@@ -1,6 +1,8 @@
 'use server';
 
 import { sql } from '@vercel/postgres';
+// @ts-ignore
+import nodemailer from 'nodemailer';
 
 export interface ProductoStock {
   material_id: string;
@@ -11,19 +13,251 @@ export interface ProductoStock {
   region: string;
 }
 
-export async function obtenerStockPorRegion(region: string): Promise<ProductoStock[]> {
-  // 1. Chismosos para ver si Next.js está ciego
-  console.log("====== INICIANDO CONSULTA ======");
-  console.log("1. Región solicitada:", region);
-  console.log("2. ¿La llave existe?:", process.env.POSTGRES_URL ? "SÍ ✅" : "NO ❌ (Aquí está el error)");
+export interface Vendedor {
+  codigo_empleado: string;
+  nombre_completo: string;
+}
 
-  // 2. Ejecutamos SIN try/catch para que el error explote y lo podamos ver
+export async function obtenerStockPorRegion(region: string): Promise<ProductoStock[]> {
   const { rows } = await sql<ProductoStock>`
     SELECT * FROM stock_disponible 
     WHERE region = ${region}
     ORDER BY descripcion ASC;
   `;
-  
-  console.log("3. Productos encontrados:", rows.length);
   return rows;
+}
+
+export async function obtenerVendedores(): Promise<Vendedor[]> {
+  const { rows } = await sql<Vendedor>`
+    SELECT * FROM vendedores
+    ORDER BY nombre_completo ASC;
+  `;
+  return rows;
+}
+
+export async function registrarPedido(pedidoData: {
+  pedido_id: string;
+  nombre_cliente: string;
+  agencia: string;
+  correo: string;
+  material_id: string;
+  descripcion: string;
+  cantidad: number;
+  precio_total: number;
+  codigo_empleado: string;
+  comprobante_url: string;
+}) {
+  try {
+    const fechaActual = new Date();
+    const fecha = new Intl.DateTimeFormat('fr-CA', {
+      timeZone: 'America/Lima', year: 'numeric', month: '2-digit', day: '2-digit'
+    }).format(fechaActual);
+    const hora = new Intl.DateTimeFormat('es-PE', {
+      timeZone: 'America/Lima', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false
+    }).format(fechaActual);
+
+    await sql`
+      INSERT INTO registro_pedidos (
+        pedido_id, fecha, hora, nombre_cliente, agencia, correo,
+        material_id, descripcion, cantidad, precio_total,
+        estado, codigo_empleado, comprobante_url
+      ) VALUES (
+        ${pedidoData.pedido_id}, ${fecha}, ${hora}, ${pedidoData.nombre_cliente},
+        ${pedidoData.agencia}, ${pedidoData.correo}, ${pedidoData.material_id},
+        ${pedidoData.descripcion}, ${pedidoData.cantidad}, ${pedidoData.precio_total},
+        'EN REVISION', ${pedidoData.codigo_empleado}, ${pedidoData.comprobante_url}
+      );
+    `;
+
+    return { exito: true };
+  } catch (error) {
+    console.error("🔥 Error en Postgres:", error);
+    return { exito: false, error: (error as any).message ?? "Error desconocido en base de datos" };
+  }
+}
+
+export async function enviarCorreoConfirmacion(datos: {
+  nombre: string;
+  correoDestino: string;
+  pedidoId: string;
+  lugar: string;
+  total: number;
+  items: any[];
+  comprobanteUrl?: string;
+}) {
+  console.log("📧 CORREO DESTINO:", datos.correoDestino);
+  console.log("🔑 SMTP USER:", process.env.BREVO_SMTP_USER);
+  console.log("🔑 SENDER EMAIL:", process.env.BREVO_SENDER_EMAIL);
+  console.log("🔑 PASS existe:", !!process.env.BREVO_SMTP_PASS);
+  try {
+    const transporter = nodemailer.createTransport({
+      host: 'smtp-relay.brevo.com',
+      port: 587,
+      secure: false,
+      tls: {
+      rejectUnauthorized: false  // ✅ Esto soluciona el error de certificado
+      },
+      auth: {
+        user: process.env.BREVO_SMTP_USER,   // a87a86001@smtp-brevo.com
+        pass: process.env.BREVO_SMTP_PASS,   // tu clave xsmtpsib-...
+      },
+    });
+
+    await transporter.verify();
+    console.log("✅ Conexión SMTP verificada");
+
+    const info = await transporter.sendMail({
+      from: `"CBC Pedidos" <${process.env.BREVO_SENDER_EMAIL}>`,  // harryalca1@gmail.com
+      to: datos.correoDestino,
+      subject: `Confirmación de Pedido: ${datos.pedidoId}`,
+      html: `
+<!DOCTYPE html>
+<html lang="es">
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"></head>
+<body style="margin:0; padding:0; background-color:#f4f4f4; font-family: 'Segoe UI', Arial, sans-serif;">
+  <table width="100%" cellpadding="0" cellspacing="0" style="background-color:#f4f4f4; padding: 40px 20px;">
+    <tr>
+      <td align="center">
+        <table width="600" cellpadding="0" cellspacing="0" style="max-width:600px; width:100%;">
+
+          <!-- HEADER con franja multicolor -->
+          <tr>
+            <td style="background:#ffffff; border-radius: 16px 16px 0 0; padding: 32px 40px 24px 40px; text-align:center; border-top: 6px solid transparent; background-image: linear-gradient(white, white), linear-gradient(90deg, #f97316, #eab308, #22c55e, #a855f7, #06b6d4); background-origin: border-box; background-clip: padding-box, border-box;">
+            <p style="margin:0 0 6px 0; font-size:11px; font-weight:700; color:#9ca3af; letter-spacing:3px; text-transform:uppercase;">Sistema de Pedidos Interno</p>
+            <p style="margin:0; font-size:28px; font-weight:900; color:#1e3a5f;">CBC Perú</p>
+            </td>
+          </tr>
+
+          <!-- BANNER ÉXITO -->
+          <tr>
+            <td style="background:#22c55e; padding: 16px 40px; text-align:center;">
+              <p style="margin:0; font-size:15px; font-weight:700; color:#ffffff; letter-spacing:0.5px;">✅ &nbsp;¡Pedido Registrado con Éxito!</p>
+            </td>
+          </tr>
+
+          <!-- CUERPO -->
+          <tr>
+            <td style="background:#ffffff; padding: 40px;">
+
+              <p style="margin: 0 0 8px 0; font-size:17px; color:#374151;">
+                Hola <strong style="color:#111827;">${datos.nombre}</strong>,
+              </p>
+              <p style="margin: 0 0 32px 0; font-size:14px; color:#6b7280; line-height:1.7;">
+                Tu solicitud ha sido registrada correctamente. A continuación el resumen de tu pedido.
+              </p>
+
+              <!-- INFO PEDIDO -->
+              <table width="100%" cellpadding="0" cellspacing="0" style="background:#f9fafb; border-radius:12px; border:1px solid #e5e7eb; margin-bottom:28px;">
+                <tr>
+                  <td style="padding: 18px 24px; border-bottom: 1px solid #e5e7eb;">
+                    <p style="margin:0; font-size:10px; font-weight:700; color:#9ca3af; letter-spacing:2px; text-transform:uppercase;">N° de Pedido</p>
+                    <p style="margin:6px 0 0 0; font-size:22px; font-weight:900; color:#06b6d4; font-family:monospace;">${datos.pedidoId}</p>
+                  </td>
+                </tr>
+                <tr>
+                  <td style="padding: 16px 24px; border-bottom: 1px solid #e5e7eb;">
+                    <p style="margin:0; font-size:10px; font-weight:700; color:#9ca3af; letter-spacing:2px; text-transform:uppercase;">Lugar de Entrega</p>
+                    <p style="margin:6px 0 0 0; font-size:15px; font-weight:600; color:#374151;">📍 ${datos.lugar}</p>
+                  </td>
+                </tr>
+                <tr>
+                  <td style="padding: 16px 24px;">
+                    <p style="margin:0; font-size:10px; font-weight:700; color:#9ca3af; letter-spacing:2px; text-transform:uppercase;">Estado</p>
+                    <p style="margin:6px 0 0 0;">
+                      <span style="background:#fef9c3; color:#b45309; font-size:12px; font-weight:700; padding: 4px 14px; border-radius:20px; border: 1px solid #fde68a;">🔍 EN REVISIÓN DEL COMPROBANTE ADJUNTO</span>
+                    </p>
+                  </td>
+                </tr>
+              </table>
+
+              <!-- TABLA PRODUCTOS -->
+              <p style="margin: 0 0 10px 0; font-size:10px; font-weight:700; color:#9ca3af; letter-spacing:2px; text-transform:uppercase;">Detalle de Productos</p>
+              <table width="100%" cellpadding="0" cellspacing="0" style="border-radius:12px; overflow:hidden; border:1px solid #e5e7eb; margin-bottom:24px;">
+                <thead>
+                  <tr style="background:#374151;">
+                    <th style="padding:13px 20px; text-align:left; font-size:11px; font-weight:700; color:#f9fafb; letter-spacing:1px; text-transform:uppercase;">Producto</th>
+                    <th style="padding:13px 16px; text-align:center; font-size:11px; font-weight:700; color:#f9fafb; letter-spacing:1px; text-transform:uppercase;">Cant.</th>
+                    <th style="padding:13px 20px; text-align:right; font-size:11px; font-weight:700; color:#f9fafb; letter-spacing:1px; text-transform:uppercase;">Subtotal</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  ${datos.items.map((item, index) => `
+                    <tr style="background:${index % 2 === 0 ? '#ffffff' : '#f9fafb'};">
+                      <td style="padding:13px 20px; font-size:13px; color:#374151; font-weight:500; border-bottom:1px solid #f3f4f6;">${item.descripcion}</td>
+                      <td style="padding:13px 16px; text-align:center; border-bottom:1px solid #f3f4f6;">
+                        <span style="background:#e0f2fe; color:#0284c7; font-size:12px; font-weight:700; padding:3px 10px; border-radius:20px;">${item.cantidad}</span>
+                      </td>
+                      <td style="padding:13px 20px; text-align:right; font-size:14px; font-weight:700; color:#111827; border-bottom:1px solid #f3f4f6;">S/ ${(item.cantidad * item.precio_unitario).toFixed(2)}</td>
+                    </tr>
+                  `).join('')}
+                </tbody>
+              </table>
+
+              <!-- TOTAL -->
+              <table width="100%" cellpadding="0" cellspacing="0" style="border-radius:12px; overflow:hidden; border: 2px solid #06b6d4; margin-bottom:32px;">
+                <tr>
+                  <td style="padding:20px 24px; background:#ecfeff;">
+                    <table width="100%" cellpadding="0" cellspacing="0">
+                      <tr>
+                        <td style="font-size:15px; font-weight:600; color:#0e7490;">Total a Pagar</td>
+                        <td style="text-align:right; font-size:30px; font-weight:900; color:#0e7490;">S/ ${datos.total.toFixed(2)}</td>
+                      </tr>
+                    </table>
+                  </td>
+                </tr>
+              </table>
+
+              ${datos.comprobanteUrl ? `
+              <!-- COMPROBANTE -->
+              <table width="100%" cellpadding="0" cellspacing="0" style="background:#fff7ed; border:1px solid #fed7aa; border-radius:12px; margin-bottom:32px;">
+                <tr>
+                  <td style="padding:16px 20px;">
+                    <p style="margin:0; font-size:13px; font-weight:700; color:#ea580c;">📎 Comprobante de pago adjunto</p>
+                    <a href="${datos.comprobanteUrl}" target="_blank" 
+                      style="display:inline-block; margin-top:8px; background:#ea580c; color:#ffffff; font-size:13px; font-weight:700; padding: 8px 20px; border-radius:8px; text-decoration:none;">
+                      Ver imagen del comprobante →
+                    </a>
+                    <p style="margin:8px 0 0 0; font-size:11px; color:#9a3412; word-break:break-all;">
+                      O copia este link: ${datos.comprobanteUrl}
+                    </p>
+                  </td>
+                </tr>
+              </table>
+              ` : ''}
+
+              <p style="margin:0; font-size:13px; color:#9ca3af; line-height:1.7;">
+                Para consultas sobre tu pedido, comunícate con el área de logística indicando tu número de pedido.
+              </p>
+            </td>
+          </tr>
+
+          <!-- BARRA MULTICOLOR -->
+          <tr>
+            <td style="padding:0; height:5px; background: linear-gradient(90deg, #f97316 0%, #eab308 25%, #22c55e 50%, #a855f7 75%, #06b6d4 100%);"></td>
+          </tr>
+
+          <!-- FOOTER -->
+          <tr>
+            <td style="background:#f9fafb; border-radius: 0 0 16px 16px; padding: 20px 40px; text-align:center; border: 1px solid #e5e7eb; border-top:none;">
+              <p style="margin:0 0 4px 0; font-size:13px; font-weight:700; color:#374151;">cbc Perú</p>
+              <p style="margin:0; font-size:11px; color:#9ca3af;">Sistema de Pedidos Interno &nbsp;•&nbsp; Uso exclusivo de trabajadores</p>
+            </td>
+          </tr>
+
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>
+`,
+    }); // ✅ AQUÍ ESTABA EL ERROR: Faltaba cerrar esta función
+
+    console.log("✅ Correo enviado:", info.messageId);
+    return { exito: true };
+
+  } catch (error) {
+    console.error("❌ Error enviando correo:", error);
+    return { exito: false, error: (error as any).message };
+  }
 }
