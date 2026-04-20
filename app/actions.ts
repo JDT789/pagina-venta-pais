@@ -18,9 +18,26 @@ export interface Vendedor {
   nombre_completo: string;
 }
 
+export interface PedidoExistenteItem {
+  pedido_id: string;
+  material_id: string;
+  descripcion: string;
+  cantidad: number;
+  precio_total: number;
+  precio_unitario: number; 
+  agencia: string;
+  estado: string;
+  nombre_cliente: string;
+  comprobante_url: string;
+  stock_actual: number; 
+}
+
 export async function obtenerStockPorRegion(region: string): Promise<ProductoStock[]> {
   const { rows } = await sql<ProductoStock>`
-    SELECT * FROM stock_disponible 
+    SELECT 
+      material_id, 
+      descripcion, stock, precio_unitario, grupo, region 
+    FROM stock_disponible 
     WHERE region = ${region}
     ORDER BY descripcion ASC;
   `;
@@ -31,6 +48,30 @@ export async function obtenerVendedores(): Promise<Vendedor[]> {
   const { rows } = await sql<Vendedor>`
     SELECT * FROM vendedores
     ORDER BY nombre_completo ASC;
+  `;
+  return rows;
+}
+
+// CORRECCIÓN: Buscamos usando "LIKE" para que al escribir PED-123 encuentre todos los items asociados a ese pedido
+export async function obtenerPedidoPorId(pedidoId: string): Promise<PedidoExistenteItem[]> {
+  const searchTerm = `${pedidoId}%`;
+  const { rows } = await sql<any>`
+    SELECT 
+      rp.pedido_id,
+      rp.material_id,
+      rp.descripcion,
+      rp.cantidad,
+      rp.precio_total,
+      rp.agencia,
+      rp.estado,
+      rp.nombre_cliente,
+      rp.comprobante_url,
+      (rp.precio_total / rp.cantidad)::numeric as precio_unitario,
+      sd.stock as stock_actual
+    FROM registro_pedidos rp
+    LEFT JOIN stock_disponible sd 
+      ON rp.material_id = sd.material_id 
+    WHERE rp.pedido_id LIKE ${searchTerm};
   `;
   return rows;
 }
@@ -69,10 +110,53 @@ export async function registrarPedido(pedidoData: {
       );
     `;
 
+    await sql`
+      UPDATE stock_disponible 
+      SET stock = stock - ${pedidoData.cantidad}
+      WHERE material_id = ${pedidoData.material_id};
+    `;
+
     return { exito: true };
   } catch (error) {
-    console.error("🔥 Error en Postgres:", error);
+    console.error("🔥 Error en Postgres (Registro):", error);
     return { exito: false, error: (error as any).message ?? "Error desconocido en base de datos" };
+  }
+}
+
+export async function actualizarPedido(datos: {
+  pedidoId: string;
+  lugar: string;
+  comprobanteUrl: string;
+  items: { material_id: string; cantidad_nueva: number; cantidad_antigua: number; precio_unitario: number }[];
+}) {
+  try {
+    for (const item of datos.items) {
+      const nuevoPrecioTotal = item.cantidad_nueva * item.precio_unitario;
+      const diferenciaCantidad = item.cantidad_nueva - item.cantidad_antigua;
+      
+      // Armamos el ID exacto que tiene la BD para actualizar la fila correcta
+      const idDbExacto = `${datos.pedidoId}-${item.material_id}`;
+
+      await sql`
+        UPDATE registro_pedidos
+        SET 
+          agencia = ${datos.lugar},
+          cantidad = ${item.cantidad_nueva},
+          precio_total = ${nuevoPrecioTotal},
+          comprobante_url = ${datos.comprobanteUrl}
+        WHERE pedido_id = ${idDbExacto};
+      `;
+
+      await sql`
+        UPDATE stock_disponible 
+        SET stock = stock - ${diferenciaCantidad}
+        WHERE material_id = ${item.material_id};
+      `;
+    }
+    return { exito: true };
+  } catch (error) {
+    console.error("🔥 Error actualizando pedido en Postgres:", error);
+    return { exito: false, error: (error as any).message ?? "Fallo al actualizar en base de datos" };
   }
 }
 
@@ -85,29 +169,24 @@ export async function enviarCorreoConfirmacion(datos: {
   items: any[];
   comprobanteUrl?: string;
 }) {
-  console.log("📧 CORREO DESTINO:", datos.correoDestino);
-  console.log("🔑 SMTP USER:", process.env.BREVO_SMTP_USER);
-  console.log("🔑 SENDER EMAIL:", process.env.BREVO_SENDER_EMAIL);
-  console.log("🔑 PASS existe:", !!process.env.BREVO_SMTP_PASS);
   try {
     const transporter = nodemailer.createTransport({
       host: 'smtp-relay.brevo.com',
       port: 587,
       secure: false,
       tls: {
-      rejectUnauthorized: false  // ✅ Esto soluciona el error de certificado
+        rejectUnauthorized: false
       },
       auth: {
-        user: process.env.BREVO_SMTP_USER,   // a87a86001@smtp-brevo.com
-        pass: process.env.BREVO_SMTP_PASS,   // tu clave xsmtpsib-...
+        user: process.env.BREVO_SMTP_USER,
+        pass: process.env.BREVO_SMTP_PASS,
       },
     });
 
     await transporter.verify();
-    console.log("✅ Conexión SMTP verificada");
 
     const info = await transporter.sendMail({
-      from: `"CBC Pedidos" <${process.env.BREVO_SENDER_EMAIL}>`,  // harryalca1@gmail.com
+      from: `"CBC Pedidos" <${process.env.BREVO_SENDER_EMAIL}>`,
       to: datos.correoDestino,
       subject: `Confirmación de Pedido: ${datos.pedidoId}`,
       html: `
@@ -119,34 +198,25 @@ export async function enviarCorreoConfirmacion(datos: {
     <tr>
       <td align="center">
         <table width="600" cellpadding="0" cellspacing="0" style="max-width:600px; width:100%;">
-
-          <!-- HEADER con franja multicolor -->
           <tr>
             <td style="background:#ffffff; border-radius: 16px 16px 0 0; padding: 32px 40px 24px 40px; text-align:center; border-top: 6px solid transparent; background-image: linear-gradient(white, white), linear-gradient(90deg, #f97316, #eab308, #22c55e, #a855f7, #06b6d4); background-origin: border-box; background-clip: padding-box, border-box;">
-            <p style="margin:0 0 6px 0; font-size:11px; font-weight:700; color:#9ca3af; letter-spacing:3px; text-transform:uppercase;">Sistema de Pedidos Interno</p>
-            <p style="margin:0; font-size:28px; font-weight:900; color:#1e3a5f;">CBC Perú</p>
+              <p style="margin:0 0 6px 0; font-size:11px; font-weight:700; color:#9ca3af; letter-spacing:3px; text-transform:uppercase;">Sistema de Pedidos Interno</p>
+              <p style="margin:0; font-size:28px; font-weight:900; color:#1e3a5f;">CBC Perú</p>
             </td>
           </tr>
-
-          <!-- BANNER ÉXITO -->
           <tr>
             <td style="background:#22c55e; padding: 16px 40px; text-align:center;">
-              <p style="margin:0; font-size:15px; font-weight:700; color:#ffffff; letter-spacing:0.5px;">✅ &nbsp;¡Pedido Registrado con Éxito!</p>
+              <p style="margin:0; font-size:15px; font-weight:700; color:#ffffff; letter-spacing:0.5px;">✅ &nbsp;¡Pedido Registrado/Modificado con Éxito!</p>
             </td>
           </tr>
-
-          <!-- CUERPO -->
           <tr>
             <td style="background:#ffffff; padding: 40px;">
-
               <p style="margin: 0 0 8px 0; font-size:17px; color:#374151;">
                 Hola <strong style="color:#111827;">${datos.nombre}</strong>,
               </p>
               <p style="margin: 0 0 32px 0; font-size:14px; color:#6b7280; line-height:1.7;">
-                Tu solicitud ha sido registrada correctamente. A continuación el resumen de tu pedido.
+                Tu solicitud ha sido procesada correctamente en la base de datos.
               </p>
-
-              <!-- INFO PEDIDO -->
               <table width="100%" cellpadding="0" cellspacing="0" style="background:#f9fafb; border-radius:12px; border:1px solid #e5e7eb; margin-bottom:28px;">
                 <tr>
                   <td style="padding: 18px 24px; border-bottom: 1px solid #e5e7eb;">
@@ -160,17 +230,7 @@ export async function enviarCorreoConfirmacion(datos: {
                     <p style="margin:6px 0 0 0; font-size:15px; font-weight:600; color:#374151;">📍 ${datos.lugar}</p>
                   </td>
                 </tr>
-                <tr>
-                  <td style="padding: 16px 24px;">
-                    <p style="margin:0; font-size:10px; font-weight:700; color:#9ca3af; letter-spacing:2px; text-transform:uppercase;">Estado</p>
-                    <p style="margin:6px 0 0 0;">
-                      <span style="background:#fef9c3; color:#b45309; font-size:12px; font-weight:700; padding: 4px 14px; border-radius:20px; border: 1px solid #fde68a;">🔍 EN REVISIÓN DEL COMPROBANTE ADJUNTO</span>
-                    </p>
-                  </td>
-                </tr>
               </table>
-
-              <!-- TABLA PRODUCTOS -->
               <p style="margin: 0 0 10px 0; font-size:10px; font-weight:700; color:#9ca3af; letter-spacing:2px; text-transform:uppercase;">Detalle de Productos</p>
               <table width="100%" cellpadding="0" cellspacing="0" style="border-radius:12px; overflow:hidden; border:1px solid #e5e7eb; margin-bottom:24px;">
                 <thead>
@@ -192,8 +252,6 @@ export async function enviarCorreoConfirmacion(datos: {
                   `).join('')}
                 </tbody>
               </table>
-
-              <!-- TOTAL -->
               <table width="100%" cellpadding="0" cellspacing="0" style="border-radius:12px; overflow:hidden; border: 2px solid #06b6d4; margin-bottom:32px;">
                 <tr>
                   <td style="padding:20px 24px; background:#ecfeff;">
@@ -206,9 +264,7 @@ export async function enviarCorreoConfirmacion(datos: {
                   </td>
                 </tr>
               </table>
-
-              ${datos.comprobanteUrl ? `
-              <!-- COMPROBANTE -->
+              ${datos.comprobanteUrl && datos.comprobanteUrl !== 'Sin comprobante' ? `
               <table width="100%" cellpadding="0" cellspacing="0" style="background:#fff7ed; border:1px solid #fed7aa; border-radius:12px; margin-bottom:32px;">
                 <tr>
                   <td style="padding:16px 20px;">
@@ -217,41 +273,32 @@ export async function enviarCorreoConfirmacion(datos: {
                       style="display:inline-block; margin-top:8px; background:#ea580c; color:#ffffff; font-size:13px; font-weight:700; padding: 8px 20px; border-radius:8px; text-decoration:none;">
                       Ver imagen del comprobante →
                     </a>
-                    <p style="margin:8px 0 0 0; font-size:11px; color:#9a3412; word-break:break-all;">
-                      O copia este link: ${datos.comprobanteUrl}
-                    </p>
                   </td>
                 </tr>
               </table>
               ` : ''}
-
               <p style="margin:0; font-size:13px; color:#9ca3af; line-height:1.7;">
                 Para consultas sobre tu pedido, comunícate con el área de logística indicando tu número de pedido.
               </p>
             </td>
           </tr>
-
-          <!-- BARRA MULTICOLOR -->
           <tr>
             <td style="padding:0; height:5px; background: linear-gradient(90deg, #f97316 0%, #eab308 25%, #22c55e 50%, #a855f7 75%, #06b6d4 100%);"></td>
           </tr>
-
-          <!-- FOOTER -->
           <tr>
             <td style="background:#f9fafb; border-radius: 0 0 16px 16px; padding: 20px 40px; text-align:center; border: 1px solid #e5e7eb; border-top:none;">
-              <p style="margin:0 0 4px 0; font-size:13px; font-weight:700; color:#374151;">cbc Perú</p>
+              <p style="margin:0 0 4px 0; font-size:13px; font-weight:700; color:#374151;">CBC Perú</p>
               <p style="margin:0; font-size:11px; color:#9ca3af;">Sistema de Pedidos Interno &nbsp;•&nbsp; Uso exclusivo de trabajadores</p>
             </td>
           </tr>
-
         </table>
       </td>
     </tr>
   </table>
 </body>
 </html>
-`,
-    }); // ✅ AQUÍ ESTABA EL ERROR: Faltaba cerrar esta función
+      `,
+    });
 
     console.log("✅ Correo enviado:", info.messageId);
     return { exito: true };

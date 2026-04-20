@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { obtenerStockPorRegion, ProductoStock, registrarPedido, obtenerVendedores, Vendedor, enviarCorreoConfirmacion } from './actions';
+import { obtenerStockPorRegion, ProductoStock, registrarPedido, obtenerVendedores, Vendedor, enviarCorreoConfirmacion, obtenerPedidoPorId, PedidoExistenteItem, actualizarPedido } from './actions';
 
 interface ItemCarrito {
   material_id: string;
@@ -17,7 +17,7 @@ export default function Home() {
   
   const [carrito, setCarrito] = useState<ItemCarrito[]>([]);
   const [mostrarCarrito, setMostrarCarrito] = useState(false);
-  const [pantalla, setPantalla] = useState<'catalogo' | 'checkout'>('catalogo');
+  const [pantalla, setPantalla] = useState<'catalogo' | 'checkout' | 'modificar'>('catalogo');
 
   const [comprobante, setComprobante] = useState<File | null>(null);
   const [guardando, setGuardando] = useState(false);
@@ -33,6 +33,19 @@ export default function Home() {
     codigoEmpleado: ''
   });
 
+  const [modalRegion, setModalRegion] = useState(false);
+  const [modalModificar, setModalModificar] = useState(false);
+
+  const [busquedaProducto, setBusquedaProducto] = useState('');
+  const [categoriaFiltro, setCategoriaFiltro] = useState('Todos');
+
+  const [idPedidoModificar, setIdPedidoModificar] = useState('');
+  const [buscandoPedido, setBuscandoPedido] = useState(false);
+  const [itemsPedidoOriginal, setItemsPedidoOriginal] = useState<PedidoExistenteItem[]>([]);
+  const [cantidadesModificadasMap, setCantidadesModificadasMap] = useState<Record<string, number>>({});
+  const [lugarModificado, setLugarModificado] = useState('');
+  const [comprobanteModificado, setComprobanteModificado] = useState<File | null>(null);
+
   const cargarDatos = async (region: string) => {
     setRegionSeleccionada(region);
     setCargando(true);
@@ -42,13 +55,14 @@ export default function Home() {
     setComprobante(null);
     setDatosVenta({ nombre: '', lugar: '', correo: '', codigoEmpleado: '' });
     setBusquedaVendedor('');
+    setBusquedaProducto('');
+    setCategoriaFiltro('Todos');
     
     try {
       const [datosStock, datosVendedores] = await Promise.all([
         obtenerStockPorRegion(region),
         obtenerVendedores()
       ]);
-      
       setStockReal(datosStock);
       setVendedoresBD(datosVendedores);
     } catch (error) {
@@ -61,9 +75,15 @@ export default function Home() {
   const actualizarCantidad = (producto: ProductoStock, cambio: number) => {
     setCarrito((carritoActual) => {
       const itemExistente = carritoActual.find(item => item.material_id === producto.material_id);
+      
       if (itemExistente) {
         const nuevaCantidad = itemExistente.cantidad + cambio;
-        if (nuevaCantidad > producto.stock) return carritoActual;
+        
+        if (nuevaCantidad > producto.stock) {
+            alert(`⚠️ ALERTA DE INVENTARIO: No hay suficiente stock. Solo quedan ${producto.stock} unidades disponibles en el almacén.`);
+            return carritoActual;
+        }
+
         if (nuevaCantidad <= 0) return carritoActual.filter(item => item.material_id !== producto.material_id);
         return carritoActual.map(item => item.material_id === producto.material_id ? { ...item, cantidad: nuevaCantidad } : item);
       } else {
@@ -109,12 +129,11 @@ export default function Home() {
 
         if (!uploadRes.ok) throw new Error("No se pudo subir el comprobante");
         const uploadData = await uploadRes.json();
-        comprobanteUrl = uploadData.secure_url; 
+        comprobanteUrl = uploadData.secure_url;
       }
 
       for (const item of carrito) {
         const idUnicoFila = `${ordenBaseId}-${item.material_id}`;
-
         const respuesta = await registrarPedido({
           pedido_id: idUnicoFila,
           nombre_cliente: datosVenta.nombre,
@@ -125,11 +144,18 @@ export default function Home() {
           cantidad: item.cantidad,
           precio_total: item.cantidad * item.precio_unitario,
           codigo_empleado: datosVenta.codigoEmpleado,
-          comprobante_url: comprobanteUrl, 
+          comprobante_url: comprobanteUrl,
         });
-
         if (!respuesta.exito) throw new Error("Fallo al insertar en la base de datos");
       }
+
+      setStockReal(prevStock =>
+        prevStock.map(prod => {
+          const itemPedido = carrito.find(i => i.material_id === prod.material_id);
+          if (itemPedido) return { ...prod, stock: prod.stock - itemPedido.cantidad };
+          return prod;
+        })
+      );
 
       if (datosVenta.correo) {
         await enviarCorreoConfirmacion({
@@ -139,12 +165,11 @@ export default function Home() {
           lugar: datosVenta.lugar,
           total: totalPagar,
           items: carrito,
-          comprobanteUrl: comprobanteUrl, 
+          comprobanteUrl: comprobanteUrl,
         });
       }
 
       alert(`✅ ¡Pedido ${ordenBaseId} registrado con éxito!`);
-
       setCarrito([]);
       setDatosVenta({ nombre: '', lugar: '', correo: '', codigoEmpleado: '' });
       setBusquedaVendedor('');
@@ -159,50 +184,153 @@ export default function Home() {
     }
   };
 
+  const buscarPedidoParaModificar = async () => {
+    if (!idPedidoModificar) {
+      alert("Ingresa un ID de pedido válido.");
+      return;
+    }
+    setBuscandoPedido(true);
+    setItemsPedidoOriginal([]);
+    setCantidadesModificadasMap({});
+    setComprobanteModificado(null);
+    setLugarModificado('');
+    
+    try {
+      const itemsPedido = await obtenerPedidoPorId(idPedidoModificar);
+      if (!itemsPedido || itemsPedido.length === 0) {
+        alert("❌ No se encontró ningún pedido con ese ID.");
+        return;
+      }
+      
+      setItemsPedidoOriginal(itemsPedido);
+      setLugarModificado(itemsPedido[0].agencia); 
+      
+      const mapaInicialQuantities: Record<string, number> = {};
+      itemsPedido.forEach(item => {
+        mapaInicialQuantities[item.material_id] = item.cantidad;
+      });
+      setCantidadesModificadasMap(mapaInicialQuantities);
+      
+      setModalModificar(false);
+      setPantalla('modificar');
+      
+    } catch (error) {
+      console.error(error);
+      alert("❌ Error buscando el pedido. Revisa tu conexión.");
+    } finally {
+      setBuscandoPedido(false);
+    }
+  };
+
+  const actualizarCantidadPedidoExistente = (materialId: string, cambio: number) => {
+    const itemOriginal = itemsPedidoOriginal.find(i => i.material_id === materialId);
+    if (!itemOriginal) return;
+
+    setCantidadesModificadasMap(prev => {
+      const cantidadActual = prev[materialId] || itemOriginal.cantidad;
+      const nuevaCantidad = cantidadActual + cambio;
+      
+      if (nuevaCantidad <= 0) return prev;
+
+      const maximoPermitido = Number(itemOriginal.stock_actual) + Number(itemOriginal.cantidad);
+      
+      if (nuevaCantidad > maximoPermitido) {
+        alert(`⚠️ LÍMITE ALCANZADO: Solo hay ${itemOriginal.stock_actual} unidades extras disponibles en almacén. No puedes llevar más de ${maximoPermitido} en total.`);
+        return prev;
+      }
+
+      return {
+        ...prev,
+        [materialId]: nuevaCantidad
+      };
+    });
+  };
+
+  const guardarCambiosPedido = async () => {
+    if (!lugarModificado) {
+      alert("⚠️ Error: Debes seleccionar un Lugar de la lista.");
+      return;
+    }
+    if (itemsPedidoOriginal.length === 0) return;
+    
+    setGuardando(true);
+    
+    try {
+      let comprobanteUrlFinal = itemsPedidoOriginal[0].comprobante_url; 
+      
+      if (comprobanteModificado) {
+        const formData = new FormData();
+        formData.append('file', comprobanteModificado);
+        formData.append('upload_preset', process.env.NEXT_PUBLIC_CLOUDINARY_UPLOAD_PRESET!);
+        formData.append('folder', 'comprobantes_cbc');
+
+        const uploadRes = await fetch(
+          `https://api.cloudinary.com/v1_1/${process.env.NEXT_PUBLIC_CLOUDINARY_CLOUD_NAME}/image/upload`,
+          { method: 'POST', body: formData }
+        );
+
+        if (!uploadRes.ok) throw new Error("No se pudo subir el nuevo comprobante");
+        const uploadData = await uploadRes.json();
+        comprobanteUrlFinal = uploadData.secure_url;
+      }
+      
+      const itemsToUpdate = itemsPedidoOriginal.map(itemOriginal => ({
+        material_id: itemOriginal.material_id,
+        cantidad_nueva: cantidadesModificadasMap[itemOriginal.material_id], 
+        cantidad_antigua: itemOriginal.cantidad,
+        precio_unitario: Number(itemOriginal.precio_unitario)
+      }));
+      
+      const respuesta = await actualizarPedido({
+        pedidoId: idPedidoModificar,
+        lugar: lugarModificado,
+        comprobanteUrl: comprobanteUrlFinal,
+        items: itemsToUpdate
+      });
+      
+      if (!respuesta.exito) throw new Error(respuesta.error);
+      
+      alert(`✅ ¡Inventario reajustado! Pedido ${idPedidoModificar} actualizado con éxito.`);
+      
+      setIdPedidoModificar('');
+      setItemsPedidoOriginal([]);
+      setCantidadesModificadasMap({});
+      setComprobanteModificado(null);
+      setPantalla('catalogo');
+      
+    } catch (error) {
+      console.error(error);
+      alert("❌ Hubo un error al guardar los cambios en la base de datos.");
+    } finally {
+      setGuardando(false);
+    }
+  };
+
   const totalPagar = carrito.reduce((suma, item) => suma + (item.cantidad * item.precio_unitario), 0);
 
-  const productosBodeguita = stockReal.filter(p => p.grupo === 'La Bodeguita');
-  const productosMore = stockReal.filter(p => p.grupo === 'More');
-  const productosDiageo = stockReal.filter(p => p.grupo === 'DIAGEO');
+  const productosFiltrados = stockReal.filter(p => {
+    const coincideBusqueda = p.descripcion.toLowerCase().includes(busquedaProducto.toLowerCase()) || p.material_id.toLowerCase().includes(busquedaProducto.toLowerCase());
+    const coincideCategoria = categoriaFiltro === 'Todos' || p.grupo === categoriaFiltro;
+    return coincideBusqueda && coincideCategoria;
+  });
+  const productosBodeguita = productosFiltrados.filter(p => p.grupo === 'La Bodeguita');
+  const productosMore = productosFiltrados.filter(p => p.grupo === 'More');
+  const productosDiageo = productosFiltrados.filter(p => p.grupo === 'DIAGEO');
 
-  // VISTA 1: SELECCIÓN DE REGIÓN (LANDING)
-  if (!regionSeleccionada) {
+  if (!regionSeleccionada && pantalla !== 'modificar') {
     return (
       <main className="min-h-screen overflow-hidden antialiased" style={{background: 'linear-gradient(135deg, #0a0f1e 0%, #0d1b3e 50%, #0a1628 100%)'}}>
         
         <style>{`
           @import url('https://fonts.googleapis.com/css2?family=Syne:wght@700;800&family=DM+Sans:wght@400;500;700&display=swap');
           
-          body {
-            -webkit-font-smoothing: antialiased;
-            -moz-osx-font-smoothing: grayscale;
-            text-rendering: optimizeLegibility;
-          }
-
-          @keyframes pulse {
-            0%, 100% { transform: scale(1); opacity: 1; }
-            50% { transform: scale(1.1); opacity: 0.7; }
-          }
-          @keyframes fadeUp {
-            from { opacity: 0; transform: translateY(30px); }
-            to { opacity: 1; transform: translateY(0); }
-          }
-          @keyframes fadeIn {
-            from { opacity: 0; }
-            to { opacity: 1; }
-          }
-          @keyframes spinSlow {
-            from { transform: rotate(0deg); }
-            to { transform: rotate(360deg); }
-          }
-          @keyframes float {
-            0%, 100% { transform: translateY(0px); }
-            50% { transform: translateY(-12px); }
-          }
-          @keyframes shimmer {
-            0% { background-position: -200% center; }
-            100% { background-position: 200% center; }
-          }
+          body { -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale; text-rendering: optimizeLegibility; }
+          @keyframes pulse { 0%, 100% { transform: scale(1); opacity: 1; } 50% { transform: scale(1.1); opacity: 0.7; } }
+          @keyframes fadeUp { from { opacity: 0; transform: translateY(30px); } to { opacity: 1; transform: translateY(0); } }
+          @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+          @keyframes spinSlow { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+          @keyframes float { 0%, 100% { transform: translateY(0px); } 50% { transform: translateY(-12px); } }
+          @keyframes shimmer { 0% { background-position: -200% center; } 100% { background-position: 200% center; } }
           .badge { animation: fadeUp 0.6s ease forwards; opacity: 0; animation-delay: 0.1s; }
           .hero-title { animation: fadeUp 0.7s ease forwards; opacity: 0; animation-delay: 0.25s; }
           .hero-sub { animation: fadeUp 0.7s ease forwards; opacity: 0; animation-delay: 0.4s; }
@@ -210,66 +338,26 @@ export default function Home() {
           .hero-logo { animation: fadeIn 1s ease forwards; opacity: 0; animation-delay: 0.3s; }
           .logo-float { animation: float 5s ease-in-out infinite; }
           .ring-spin { animation: spinSlow 20s linear infinite; }
-          .shimmer-text {
-            background: linear-gradient(90deg, #06b6d4, #ffffff, #06b6d4, #a78bfa);
-            background-size: 200% auto;
-            -webkit-background-clip: text;
-            -webkit-text-fill-color: transparent;
-            animation: shimmer 4s linear infinite;
-          }
-          .card-region {
-            transition: all 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
-          }
-          .card-region:hover {
-            transform: translateY(-6px) scale(1.02);
-          }
-          .glow-btn {
-            position: relative;
-            overflow: hidden;
-            transition: all 0.3s ease;
-          }
-          .glow-btn::before {
-            content: '';
-            position: absolute;
-            top: 0; left: -100%;
-            width: 100%; height: 100%;
-            background: linear-gradient(90deg, transparent, rgba(255,255,255,0.15), transparent);
-            transition: left 0.5s ease;
-          }
+          .shimmer-text { background: linear-gradient(90deg, #06b6d4, #ffffff, #06b6d4, #a78bfa); background-size: 200% auto; -webkit-background-clip: text; -webkit-text-fill-color: transparent; animation: shimmer 4s linear infinite; }
+          .card-region { transition: all 0.3s cubic-bezier(0.34, 1.56, 0.64, 1); }
+          .card-region:hover { transform: translateY(-6px) scale(1.02); }
+          .glow-btn { position: relative; overflow: hidden; transition: all 0.3s ease; }
+          .glow-btn::before { content: ''; position: absolute; top: 0; left: -100%; width: 100%; height: 100%; background: linear-gradient(90deg, transparent, rgba(255,255,255,0.15), transparent); transition: left 0.5s ease; }
           .glow-btn:hover::before { left: 100%; }
           .glow-btn:hover { box-shadow: 0 0 30px rgba(6,182,212,0.4); }
+          .modal-btn { transition: all 0.2s ease; }
+          .modal-btn:hover { filter: brightness(1.15); transform: translateY(-2px); }
         `}</style>
 
-        {/* FONDO ANIMADO */}
         <div className="fixed inset-0 pointer-events-none overflow-hidden">
-          <div style={{
-            position: 'absolute', top: '-20%', left: '-10%',
-            width: '600px', height: '600px', borderRadius: '50%',
-            background: 'radial-gradient(circle, rgba(6,182,212,0.08) 0%, transparent 70%)',
-            animation: 'pulse 8s ease-in-out infinite'
-          }}/>
-          <div style={{
-            position: 'absolute', bottom: '-10%', right: '-10%',
-            width: '500px', height: '500px', borderRadius: '50%',
-            background: 'radial-gradient(circle, rgba(168,85,247,0.06) 0%, transparent 70%)',
-            animation: 'pulse 10s ease-in-out infinite reverse'
-          }}/>
+          <div style={{position: 'absolute', top: '-20%', left: '-10%', width: '600px', height: '600px', borderRadius: '50%', background: 'radial-gradient(circle, rgba(6,182,212,0.08) 0%, transparent 70%)', animation: 'pulse 8s ease-in-out infinite'}}/>
+          <div style={{position: 'absolute', bottom: '-10%', right: '-10%', width: '500px', height: '500px', borderRadius: '50%', background: 'radial-gradient(circle, rgba(168,85,247,0.06) 0%, transparent 70%)', animation: 'pulse 10s ease-in-out infinite reverse'}}/>
+          <div style={{position: 'absolute', inset: 0, backgroundImage: 'linear-gradient(rgba(255,255,255,0.02) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.02) 1px, transparent 1px)', backgroundSize: '60px 60px'}}/>
         </div>
 
-        {/* HEADER */}
-        <header style={{
-          position: 'relative', zIndex: 10,
-          padding: '20px 32px',
-          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-          borderBottom: '1px solid rgba(255,255,255,0.05)',
-        }}>
+        <header style={{position: 'relative', zIndex: 10, padding: '20px 32px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderBottom: '1px solid rgba(255,255,255,0.05)', animation: 'fadeIn 0.5s ease forwards'}}>
           <div style={{display: 'flex', alignItems: 'center', gap: '12px'}}>
-            <div style={{
-              width: '40px', height: '40px', borderRadius: '10px',
-              background: 'rgba(255,255,255,0.08)',
-              border: '1px solid rgba(255,255,255,0.12)',
-              display: 'flex', alignItems: 'center', justifyContent: 'center',
-            }}>
+            <div style={{width: '40px', height: '40px', borderRadius: '10px', background: 'rgba(255,255,255,0.08)', border: '1px solid rgba(255,255,255,0.12)', display: 'flex', alignItems: 'center', justifyContent: 'center'}}>
               <img src="/logo.png" alt="CBC" style={{width: '28px', height: '28px', objectFit: 'contain'}}/>
             </div>
             <div>
@@ -277,76 +365,279 @@ export default function Home() {
               <p style={{margin: 0, fontSize: '12px', color: 'rgba(255,255,255,0.5)', fontFamily: 'DM Sans, sans-serif'}}>Portal Interno</p>
             </div>
           </div>
+          <div style={{display: 'flex', alignItems: 'center', gap: '8px', background: 'rgba(6,182,212,0.1)', border: '1px solid rgba(6,182,212,0.2)', borderRadius: '20px', padding: '6px 14px'}}>
+            <div style={{width: '6px', height: '6px', borderRadius: '50%', background: '#22c55e', boxShadow: '0 0 6px #22c55e'}}/>
+            <span style={{fontSize: '12px', color: 'rgba(255,255,255,0.7)', fontFamily: 'DM Sans, sans-serif'}}>Sistema Activo</span>
+          </div>
         </header>
 
-        {/* HERO SECTION */}
-        <div style={{
-          position: 'relative', zIndex: 5,
-          maxWidth: '1200px', margin: '0 auto',
-          padding: '80px 32px 60px',
-          display: 'grid', gridTemplateColumns: '1fr 1fr',
-          gap: '60px', alignItems: 'center'
-        }}>
+        <div style={{position: 'relative', zIndex: 5, maxWidth: '1200px', margin: '0 auto', padding: '80px 32px 60px', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '60px', alignItems: 'center'}}>
           <div>
-            <div className="badge" style={{
-              display: 'inline-flex', alignItems: 'center', gap: '8px',
-              background: 'rgba(6,182,212,0.1)', border: '1px solid rgba(6,182,212,0.25)',
-              borderRadius: '20px', padding: '6px 16px', marginBottom: '28px'
-            }}>
-              <span style={{fontSize: '12px', fontWeight: 700, color: '#67e8f9', fontFamily: 'DM Sans, sans-serif', textTransform: 'uppercase', letterSpacing: '0.5px'}}>Uso Exclusivo Interno</span>
+            <div className="badge" style={{display: 'inline-flex', alignItems: 'center', gap: '8px', background: 'rgba(6,182,212,0.1)', border: '1px solid rgba(6,182,212,0.25)', borderRadius: '20px', padding: '6px 16px', marginBottom: '28px'}}>
+              <span style={{fontSize: '12px', fontWeight: 700, color: '#67e8f9', fontFamily: 'DM Sans, sans-serif', textTransform: 'uppercase', letterSpacing: '1px'}}>🛡️ Uso Exclusivo Interno</span>
             </div>
 
-            <h1 className="hero-title" style={{fontFamily: 'Syne, sans-serif', fontSize: '72px', fontWeight: 800, color: '#fff', lineHeight: 1.1, margin: 0}}>CBC</h1>
-            <h1 className="hero-title shimmer-text" style={{fontFamily: 'Syne, sans-serif', fontSize: '72px', fontWeight: 800, lineHeight: 1.1, margin: '0 0 24px 0'}}>Perú</h1>
+            <h1 className="hero-title" style={{fontFamily: 'Syne, sans-serif', fontSize: '72px', fontWeight: 800, color: '#fff', lineHeight: 1.0, margin: '0 0 4px 0'}}>CBC</h1>
+            <h1 className="hero-title shimmer-text" style={{fontFamily: 'Syne, sans-serif', fontSize: '72px', fontWeight: 800, lineHeight: 1.0, margin: '0 0 28px 0'}}>Perú</h1>
 
-            <p className="hero-sub" style={{fontFamily: 'DM Sans, sans-serif', fontSize: '18px', color: 'rgba(255,255,255,0.7)', lineHeight: 1.6, marginBottom: '40px', maxWidth: '440px'}}>
+            <p className="hero-sub" style={{fontFamily: 'DM Sans, sans-serif', fontSize: '17px', color: 'rgba(255,255,255,0.6)', lineHeight: 1.7, margin: '0 0 40px 0', maxWidth: '420px'}}>
               Gestiona solicitudes de distribución e inventario en tiempo real para las sedes de Lima y Norte.
             </p>
 
-            <div className="hero-btns" style={{display: 'flex', gap: '16px'}}>
-              <button onClick={() => cargarDatos('Lima')} className="glow-btn" style={{background: 'linear-gradient(135deg, #06b6d4, #0891b2)', color: '#fff', border: 'none', padding: '16px 32px', borderRadius: '14px', cursor: 'pointer', fontFamily: 'Syne, sans-serif', fontWeight: 700, fontSize: '16px'}}>📍 Región Lima</button>
-              <button onClick={() => cargarDatos('Norte')} className="card-region" style={{background: 'rgba(255,255,255,0.05)', color: '#fff', border: '1px solid rgba(255,255,255,0.1)', padding: '16px 32px', borderRadius: '14px', cursor: 'pointer', fontFamily: 'Syne, sans-serif', fontWeight: 700, fontSize: '16px'}}>📍 Región Norte</button>
+            <div className="hero-sub" style={{display: 'flex', gap: '32px', marginBottom: '48px'}}>
+              {[{num: '2', label: 'Regiones'}, {num: '100%', label: 'En la nube'}, {num: '∞', label: 'Pedidos'}].map(s => (
+                <div key={s.label}>
+                  <p style={{margin: 0, fontSize: '24px', fontWeight: 800, color: '#06b6d4', fontFamily: 'Syne, sans-serif'}}>{s.num}</p>
+                  <p style={{margin: 0, fontSize: '11px', color: 'rgba(255,255,255,0.4)', fontFamily: 'DM Sans, sans-serif', textTransform: 'uppercase', letterSpacing: '1px'}}>{s.label}</p>
+                </div>
+              ))}
+            </div>
+
+            <div className="hero-btns" style={{display: 'flex', gap: '16px', flexWrap: 'wrap'}}>
+              <button onClick={() => setModalRegion(true)} className="glow-btn" style={{background: 'linear-gradient(135deg, #06b6d4, #0891b2)', border: 'none', borderRadius: '14px', padding: '16px 32px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '10px', fontFamily: 'Syne, sans-serif', fontSize: '15px', fontWeight: 700, color: '#ffffff'}}>
+                <span>🛒</span> Realizar Pedido <span style={{opacity: 0.7}}>→</span>
+              </button>
+              <button onClick={() => setModalModificar(true)} className="glow-btn card-region" style={{background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.12)', borderRadius: '14px', padding: '16px 32px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '10px', fontFamily: 'Syne, sans-serif', fontSize: '15px', fontWeight: 700, color: '#ffffff'}}>
+                <span>✏️</span> Modificar Pedido <span style={{opacity: 0.7}}>→</span>
+              </button>
             </div>
           </div>
 
-          <div className="hero-logo" style={{display: 'flex', justifyContent: 'center'}}>
-             <div className="logo-float" style={{position: 'relative', width: '300px', height: '300px'}}>
-                <div className="ring-spin" style={{position: 'absolute', inset: 0, borderRadius: '50%', border: '2px solid rgba(6,182,212,0.3)'}} />
-                <div style={{position: 'absolute', inset: '30px', background: '#fff', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 0 40px rgba(6,182,212,0.3)'}}>
-                  <img src="/logo.png" alt="Logo" style={{width: '60%'}} />
-                </div>
-             </div>
+          <div className="hero-logo" style={{display: 'flex', alignItems: 'center', justifyContent: 'center'}}>
+            <div className="logo-float" style={{position: 'relative', width: '340px', height: '340px'}}>
+              <div className="ring-spin" style={{position: 'absolute', inset: 0, borderRadius: '50%', border: '1px solid transparent', backgroundImage: 'linear-gradient(#0a0f1e, #0a0f1e), linear-gradient(135deg, #06b6d4, transparent, #a855f7)', backgroundOrigin: 'border-box', backgroundClip: 'padding-box, border-box'}}/>
+              <div style={{position: 'absolute', inset: '20px', borderRadius: '50%', border: '1px solid rgba(6,182,212,0.15)'}}/>
+              <div style={{position: 'absolute', inset: '40px', borderRadius: '50%', background: 'rgba(255,255,255,0.95)', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 0 60px rgba(6,182,212,0.2), 0 20px 60px rgba(0,0,0,0.4)'}}>
+                <img src="/logo.png" alt="CBC Logo" style={{width: '65%', objectFit: 'contain'}}/>
+              </div>
+              {[0, 90, 180, 270].map((deg, i) => (
+                <div key={i} style={{position: 'absolute', top: '50%', left: '50%', width: '10px', height: '10px', borderRadius: '50%', background: i % 2 === 0 ? '#06b6d4' : '#a855f7', boxShadow: `0 0 10px ${i % 2 === 0 ? '#06b6d4' : '#a855f7'}`, transform: `rotate(${deg}deg) translateX(165px) translate(-50%, -50%)`}}/>
+              ))}
+            </div>
           </div>
         </div>
 
-        {/* BARRA INFERIOR */}
-        <div style={{maxWidth: '1200px', margin: '0 auto', padding: '40px 32px', display: 'flex', gap: '20px'}}>
-            {[
-              {icon: '⚡', title: 'Tiempo Real', desc: 'Stock actualizado al instante'},
-              {icon: '🔒', title: 'Seguro', desc: 'Acceso por código de empleado'},
-              {icon: '📧', title: 'Confirmación', desc: 'Correo automático al registrar'}
-            ].map(f => (
-              <div key={f.title} style={{flex: 1, background: 'rgba(255,255,255,0.03)', padding: '24px', borderRadius: '16px', border: '1px solid rgba(255,255,255,0.05)'}}>
-                <div style={{fontSize: '24px', marginBottom: '12px'}}>{f.icon}</div>
-                <h3 style={{color: '#fff', fontFamily: 'Syne, sans-serif', margin: '0 0 8px 0', fontSize: '16px'}}>{f.title}</h3>
-                <p style={{color: 'rgba(255,255,255,0.5)', fontFamily: 'DM Sans, sans-serif', fontSize: '13px', margin: 0}}>{f.desc}</p>
-              </div>
-            ))}
+        <div style={{position: 'relative', zIndex: 5, maxWidth: '1200px', margin: '0 auto', padding: '0 32px 60px', display: 'flex', gap: '16px', flexWrap: 'wrap'}}>
+          {[
+            {icon: '⚡', title: 'Tiempo Real', desc: 'Stock reajustado automáticamente'},
+            {icon: '🔒', title: 'Seguro', desc: 'Acceso exclusivo para trabajadores'},
+            {icon: '📦', title: 'Multi-producto', desc: 'La Bodeguita, More y Diageo'},
+            {icon: '📧', title: 'Confirmación', desc: 'Correo automático al registrar'},
+          ].map(f => (
+            <div key={f.title} className="card-region" style={{flex: '1', minWidth: '200px', background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.07)', borderRadius: '16px', padding: '20px'}}>
+              <span style={{fontSize: '24px', display: 'block', marginBottom: '10px'}}>{f.icon}</span>
+              <p style={{margin: '0 0 4px 0', fontSize: '14px', fontWeight: 700, color: '#ffffff', fontFamily: 'Syne, sans-serif'}}>{f.title}</p>
+              <p style={{margin: 0, fontSize: '12px', color: 'rgba(255,255,255,0.4)', fontFamily: 'DM Sans, sans-serif'}}>{f.desc}</p>
+            </div>
+          ))}
         </div>
+
+        {modalRegion && (
+          <div onClick={(e) => { if (e.target === e.currentTarget) setModalRegion(false); }} style={{position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.75)', backdropFilter: 'blur(8px)', zIndex: 100, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '20px', animation: 'fadeIn 0.2s ease forwards'}}>
+            <div style={{background: 'linear-gradient(135deg, #0d1b3e, #0a1628)', border: '1px solid rgba(6,182,212,0.25)', borderRadius: '24px', padding: '40px', width: '100%', maxWidth: '440px', boxShadow: '0 0 80px rgba(6,182,212,0.15)'}}>
+              
+              <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '32px'}}>
+                <div>
+                  <p style={{margin: 0, fontSize: '11px', fontWeight: 700, color: '#67e8f9', letterSpacing: '2px', textTransform: 'uppercase', fontFamily: 'DM Sans, sans-serif'}}>Realizar Pedido</p>
+                  <h2 style={{margin: '6px 0 0 0', fontSize: '24px', fontWeight: 800, color: '#ffffff', fontFamily: 'Syne, sans-serif'}}>¿Cuál es tu región?</h2>
+                </div>
+                <button onClick={() => setModalRegion(false)} style={{background: 'rgba(255,255,255,0.08)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '50%', width: '36px', height: '36px', color: '#ffffff', cursor: 'pointer', fontSize: '16px', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0}}>✕</button>
+              </div>
+
+              <div style={{display: 'flex', flexDirection: 'column', gap: '12px'}}>
+                <button onClick={() => { setModalRegion(false); cargarDatos('Lima'); }} className="modal-btn" style={{background: 'linear-gradient(135deg, #06b6d4, #0891b2)', border: 'none', borderRadius: '16px', padding: '20px 24px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '16px', fontFamily: 'Syne, sans-serif', color: '#ffffff', textAlign: 'left', width: '100%'}}>
+                  <span style={{fontSize: '28px', flexShrink: 0}}>📍</span>
+                  <div style={{flex: 1}}>
+                    <p style={{margin: 0, fontSize: '17px', fontWeight: 700}}>Región Lima</p>
+                    <p style={{margin: '2px 0 0 0', fontSize: '12px', opacity: 0.75, fontFamily: 'DM Sans, sans-serif'}}>Callao · Chorrillos · La Molina · San Isidro</p>
+                  </div>
+                  <span style={{opacity: 0.6, fontSize: '18px'}}>→</span>
+                </button>
+
+                <button onClick={() => { setModalRegion(false); cargarDatos('Norte'); }} className="modal-btn" style={{background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.15)', borderRadius: '16px', padding: '20px 24px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '16px', fontFamily: 'Syne, sans-serif', color: '#ffffff', textAlign: 'left', width: '100%'}}>
+                  <span style={{fontSize: '28px', flexShrink: 0}}>📍</span>
+                  <div style={{flex: 1}}>
+                    <p style={{margin: 0, fontSize: '17px', fontWeight: 700}}>Región Norte</p>
+                    <p style={{margin: '2px 0 0 0', fontSize: '12px', opacity: 0.75, fontFamily: 'DM Sans, sans-serif'}}>Trujillo · Chiclayo · Piura y más</p>
+                  </div>
+                  <span style={{opacity: 0.6, fontSize: '18px'}}>→</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {modalModificar && (
+          <div onClick={(e) => { if (e.target === e.currentTarget) setModalModificar(false); }} style={{position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.75)', backdropFilter: 'blur(8px)', zIndex: 100, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '20px', animation: 'fadeIn 0.2s ease forwards'}}>
+            <div style={{background: 'linear-gradient(135deg, #0d1b3e, #0a1628)', border: '1px solid rgba(6,182,212,0.25)', borderRadius: '24px', padding: '40px', width: '100%', maxWidth: '440px', boxShadow: '0 0 80px rgba(6,182,212,0.15)'}}>
+              
+              <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '32px'}}>
+                <div>
+                  <p style={{margin: 0, fontSize: '11px', fontWeight: 700, color: '#a855f7', letterSpacing: '2px', textTransform: 'uppercase', fontFamily: 'DM Sans, sans-serif'}}>Modificar Pedido</p>
+                  <h2 style={{margin: '6px 0 0 0', fontSize: '24px', fontWeight: 800, color: '#ffffff', fontFamily: 'Syne, sans-serif'}}>Buscar Pedido</h2>
+                </div>
+                <button onClick={() => setModalModificar(false)} style={{background: 'rgba(255,255,255,0.08)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '50%', width: '36px', height: '36px', color: '#ffffff', cursor: 'pointer', fontSize: '16px', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0}}>✕</button>
+              </div>
+
+              <div style={{display: 'flex', flexDirection: 'column', gap: '20px'}}>
+                <div>
+                  <label style={{display: 'block', color: 'rgba(255,255,255,0.7)', fontSize: '13px', marginBottom: '8px', fontFamily: 'DM Sans, sans-serif'}}>ID del Pedido</label>
+                  <input 
+                    type="text" 
+                    value={idPedidoModificar} 
+                    onChange={(e) => setIdPedidoModificar(e.target.value)}
+                    placeholder="Ej: PED-123456" 
+                    style={{width: '100%', padding: '14px 16px', borderRadius: '12px', background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.15)', color: '#fff', fontSize: '15px', fontFamily: 'DM Sans, sans-serif', outline: 'none', boxSizing: 'border-box'}}
+                  />
+                </div>
+
+                <button onClick={buscarPedidoParaModificar} disabled={buscandoPedido} className="modal-btn" style={{background: 'linear-gradient(135deg, #a855f7, #9333ea)', border: 'none', borderRadius: '14px', padding: '16px', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '10px', fontFamily: 'Syne, sans-serif', fontSize: '15px', fontWeight: 700, color: '#ffffff', width: '100%'}}>
+                  {buscandoPedido ? 'Buscando...' : 'Buscar Pedido 🔍'}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
       </main>
     );
   }
 
+  // VISTA CARGANDO
   if (cargando) {
     return (
       <main className="min-h-screen bg-slate-50 flex flex-col items-center justify-center p-4">
         <div className="w-16 h-16 border-4 border-blue-200 border-t-blue-600 rounded-full animate-spin mb-4"></div>
-        <p className="text-slate-600 font-medium animate-pulse">Sincronizando con la nube...</p>
+        <p className="text-slate-600 font-medium animate-pulse">Procesando y Sincronizando...</p>
       </main>
     );
   }
 
-  // VISTA 2: FORMULARIO DE CHECKOUT
+  // ==========================================
+  // VISTA 3: INTERFAZ MODIFICAR PEDIDOEXISTENTE
+  // ==========================================
+  if (pantalla === 'modificar') {
+    return (
+      <main className="min-h-screen antialiased py-10 px-4" style={{background: 'linear-gradient(135deg, #0a0f1e 0%, #0d1b3e 50%, #0a1628 100%)', color: '#fff'}}>
+        <style>{`
+          @import url('https://fonts.googleapis.com/css2?family=Syne:wght@700;800&family=DM+Sans:wght@400;500;700&display=swap');
+          body { -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale; }
+          .dark-input { width: 100%; padding: 14px 16px; border-radius: 12px; background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.15); color: #fff; font-size: 14px; font-family: 'DM Sans', sans-serif; outline: none; box-sizing: border-box; transition: all 0.2s; }
+          .dark-input:focus { border-color: #a855f7; background: rgba(255,255,255,0.08); box-shadow: 0 0 0 3px rgba(168,85,247,0.2); }
+          .dark-input::placeholder { color: rgba(255,255,255,0.3); }
+          .dark-label { display: block; color: rgba(255,255,255,0.6); font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 8px; font-family: 'DM Sans', sans-serif; }
+          .dark-card { background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.08); border-radius: 24px; padding: 32px; backdrop-filter: blur(10px); }
+          .btn-primary-purple { background: linear-gradient(135deg, #a855f7, #9333ea); border: none; border-radius: 14px; padding: 16px; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 10px; font-family: 'Syne', sans-serif; font-size: 16px; font-weight: 700; color: #ffffff; width: 100%; transition: all 0.2s; box-shadow: 0 4px 15px rgba(168,85,247,0.3); }
+          .btn-primary-purple:hover { transform: translateY(-2px); filter: brightness(1.1); box-shadow: 0 6px 20px rgba(168,85,247,0.4); }
+          .btn-primary-purple:disabled { opacity: 0.7; cursor: not-allowed; }
+          .quantity-btn { width: 36px; height: 36px; border-radius: 10px; border: 1px solid rgba(255,255,255,0.2); background: rgba(255,255,255,0.05); color: #fff; font-weight: 800; cursor: pointer; transition: all 0.2s; font-family: 'Syne', sans-serif; }
+          .quantity-btn:hover { background: rgba(255,255,255,0.1); border-color: #a855f7; }
+          .quantity-btn:disabled { opacity: 0.3; cursor: not-allowed; }
+        `}</style>
+        
+        <div className="max-w-4xl mx-auto">
+          <header className="mb-10 flex items-center justify-between gap-6">
+            <button onClick={() => { setPantalla('catalogo'); setIdPedidoModificar(''); }} style={{background: 'none', border: 'none', color: 'rgba(255,255,255,0.5)', fontFamily: 'DM Sans, sans-serif', fontSize: '14px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '8px'}} className="hover:text-white transition-colors">
+              ← Volver al inicio
+            </button>
+            <div className="text-right">
+                <h1 style={{fontFamily: 'Syne, sans-serif', fontSize: '32px', fontWeight: 800, margin: '0 0 4px 0'}}>Modificar Pedido Existente</h1>
+                <p style={{fontFamily: 'DM Sans, sans-serif', color: 'rgba(255,255,255,0.5)', margin: 0}}>Actualiza lugar y cantidades para <span style={{color: '#a855f7', fontWeight: 700, fontFamily: 'monospace'}}>{idPedidoModificar}</span></p>
+                <p style={{fontFamily: 'DM Sans, sans-serif', color: 'rgba(255,255,255,0.5)', fontSize: '13px', margin: 0}}>Cliente: {itemsPedidoOriginal[0]?.nombre_cliente}</p>
+            </div>
+          </header>
+
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+            <div className="dark-card flex flex-col h-full">
+              <h2 style={{fontFamily: 'Syne, sans-serif', fontSize: '18px', fontWeight: 700, marginBottom: '24px', color: '#fff', borderBottom: '1px solid rgba(255,255,255,0.08)', paddingBottom: '10px'}}>Detalle del Pedido y Lugar</h2>
+              
+              <div className="mb-8">
+                <label className="dark-label">Lugar de Entrega (Editable)</label>
+                <select value={lugarModificado} onChange={(e) => setLugarModificado(e.target.value)} className="dark-input" style={{appearance: 'none'}}>
+                  <option value="Sala de ventas Norte (Callao)" style={{color: '#000'}}>Sala de ventas Norte (Callao)</option>
+                  <option value="Sala de ventas Sur (Chorrillos)" style={{color: '#000'}}>Sala de ventas Sur (Chorrillos)</option>
+                  <option value="Sala de ventas Este (La Molina)" style={{color: '#000'}}>Sala de ventas Este (La Molina)</option>
+                  <option value="Cromo (San isidro)" style={{color: '#000'}}>Cromo (San isidro)</option>
+                </select>
+              </div>
+
+              <div className="flex-1 overflow-y-auto pr-2" style={{maxHeight: '400px'}}>
+                <div className="flex flex-col gap-6">
+                  {itemsPedidoOriginal.map(item => {
+                    const cantidadModificada = cantidadesModificadasMap[item.material_id] || item.cantidad;
+                    // Límite visual: Lo que se pidió + lo que está libre ahora mismo en BD
+                    const maximoPermitido = Number(item.stock_actual) + Number(item.cantidad);
+                    
+                    return (
+                        <div key={item.material_id} style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '16px', borderBottom: '1px solid rgba(255,255,255,0.05)', paddingBottom: '16px'}}>
+                            <div style={{flex: 1}}>
+                                <p style={{fontFamily: 'DM Sans, sans-serif', fontSize: '14px', fontWeight: 700, color: '#fff', margin: '0 0 2px 0'}}>{item.descripcion}</p>
+                                <div style={{display: 'flex', alignItems: 'center', gap: '8px'}}>
+                                    <span style={{fontSize: '11px', fontFamily: 'monospace', color: 'rgba(255,255,255,0.4)', background: 'rgba(255,255,255,0.05)', padding: '2px 6px', borderRadius: '4px'}}>ID: {item.material_id}</span>
+                                    <span style={{fontSize: '13px', fontWeight: 700, color: '#06b6d4'}}>S/ {Number(item.precio_unitario).toFixed(2)} und</span>
+                                </div>
+                            </div>
+                            
+                            <div style={{display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '6px'}}>
+                              <div style={{display: 'flex', alignItems: 'center', gap: '10px', background: 'rgba(255,255,255,0.03)', borderRadius: '12px', border: '1px solid rgba(255,255,255,0.1)', padding: '4px'}}>
+                                  <button onClick={() => actualizarCantidadPedidoExistente(item.material_id, -1)} className="quantity-btn" disabled={cantidadModificada <= 1}>-</button>
+                                  <span style={{width: '40px', textAlign: 'center', fontSize: '18px', fontWeight: 800, color: '#fff', fontFamily: 'Syne, sans-serif'}}>{cantidadModificada}</span>
+                                  {/* El botón "+" se bloquea si se llega al límite */}
+                                  <button onClick={() => actualizarCantidadPedidoExistente(item.material_id, 1)} className="quantity-btn" disabled={cantidadModificada >= maximoPermitido}>+</button>
+                              </div>
+                              {/* Texto del Límite de Stock */}
+                              <span style={{fontSize: '11px', fontWeight: 600, color: cantidadModificada >= maximoPermitido ? '#fca5a5' : 'rgba(255,255,255,0.4)', fontFamily: 'DM Sans, sans-serif'}}>
+                                Límite total: {maximoPermitido}
+                              </span>
+                            </div>
+                        </div>
+                    );
+                  })}
+                </div>
+              </div>
+            </div>
+
+            <div className="dark-card flex flex-col gap-5 relative h-full">
+              <h2 style={{fontFamily: 'Syne, sans-serif', fontSize: '18px', fontWeight: 700, color: '#fff', borderBottom: '1px solid rgba(255,255,255,0.08)', paddingBottom: '10px', marginBottom: '10px'}}>Estado y Comprobante</h2>
+              
+              <div>
+                <label className="dark-label">Estado del Pedido (No Modificable)</label>
+                <input 
+                  type="text" 
+                  value={itemsPedidoOriginal[0]?.estado || ''} 
+                  readOnly 
+                  className="dark-input" 
+                  style={{background: 'rgba(255,255,255,0.02)', color: 'rgba(255,255,255,0.4)', cursor: 'not-allowed', fontWeight: 700}}
+                />
+              </div>
+
+              <div className="mt-2 flex-1 flex flex-col">
+                <label className="dark-label mb-2">Comprobante de Pago Actual / Nuevo</label>
+                
+                {itemsPedidoOriginal[0]?.comprobante_url && itemsPedidoOriginal[0].comprobante_url !== 'Sin comprobante' && !comprobanteModificado && (
+                  <div className="mb-4">
+                    <p style={{fontSize: '12px', color: 'rgba(255,255,255,0.5)', marginBottom: '5px'}}>Comprobante actual:</p>
+                    <img src={itemsPedidoOriginal[0].comprobante_url} alt="Comprobante Actual" style={{maxWidth: '100%', maxHeight: '120px', borderRadius: '12px', border: '1px solid rgba(255,255,255,0.1)'}}/>
+                  </div>
+                )}
+
+                <label className={`border-2 border-dashed rounded-xl p-6 text-center cursor-pointer block flex-1 flex flex-col justify-center items-center transition-all hover:bg-white/5 ${comprobanteModificado ? 'border-green-400 bg-green-950/20' : 'border-slate-500'}`}>
+                  {comprobanteModificado ? (<><span className="text-3xl mb-1 block">✅</span><p className="text-sm text-green-300 font-bold truncate px-4">{comprobanteModificado.name}</p></>) : (<><span className="text-2xl mb-1 block">📸</span><p className="text-sm text-slate-300 font-bold">Subir Yape / Transferencia Nuevo (Opcional)</p></>)}
+                  <input type="file" accept="image/*" className="hidden" onChange={(e) => { if (e.target.files && e.target.files[0]) setComprobanteModificado(e.target.files[0]); }}/>
+                </label>
+              </div>
+
+              <button onClick={guardarCambiosPedido} disabled={guardando} className="btn-primary-purple flex items-center justify-center gap-2">
+                {guardando ? 'Sincronizando celdas y stock...' : 'Guardar y Reajustar Inventario ✓'}
+              </button>
+            </div>
+          </div>
+        </div>
+      </main>
+    );
+  }
+
+  // VISTA CHECKOUT
   if (pantalla === 'checkout') {
     return (
       <main className="min-h-screen bg-slate-50 py-10 px-4">
@@ -354,7 +645,6 @@ export default function Home() {
           <button onClick={() => setPantalla('catalogo')} className="mb-6 text-slate-500 hover:text-slate-800 font-bold transition-colors">
             ← Volver al catálogo
           </button>
-
           <h1 className="text-3xl font-black text-slate-800 mb-8">Registro de Venta</h1>
 
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
@@ -365,94 +655,78 @@ export default function Home() {
                   <div key={item.material_id} className="flex justify-between items-start border-b border-slate-50 pb-4">
                     <div className="flex-1 pr-4">
                       <p className="font-bold text-slate-800 text-sm mb-1 leading-tight">{item.descripcion}</p>
+                      <p className="text-xs font-mono text-slate-400 mb-2">ID: {item.material_id}</p>
                       <div className="flex items-center gap-2">
-                        <span className="bg-blue-50 text-blue-700 font-bold px-2 py-1 rounded-md text-xs">{item.cantidad} und</span>
-                        <span className="text-slate-700 font-bold text-sm">S/ {item.precio_unitario.toFixed(2)}</span>
+                        <span className="bg-blue-50 text-blue-700 font-bold px-2 py-1 rounded-md text-xs border border-blue-100">{item.cantidad} und</span>
+                        <span className="text-slate-400 text-xs">x</span>
+                        <span className="text-slate-700 font-bold text-sm bg-slate-100 px-2 py-1 rounded-md border border-slate-200">S/ {item.precio_unitario.toFixed(2)}</span>
                       </div>
                     </div>
-                    <p className="font-black text-slate-800 text-lg">S/ {(item.cantidad * item.precio_unitario).toFixed(2)}</p>
+                    <p className="font-black text-slate-800 text-lg mt-1 whitespace-nowrap">S/ {(item.cantidad * item.precio_unitario).toFixed(2)}</p>
                   </div>
                 ))}
               </div>
-              <div className="border-t border-slate-200 pt-6 flex justify-between items-end">
+              <div className="border-t border-slate-200 pt-6 flex justify-between items-end mt-auto">
                 <span className="text-slate-500 font-bold text-lg">Total Final:</span>
                 <span className="text-4xl font-black text-green-600">S/ {totalPagar.toFixed(2)}</span>
               </div>
             </div>
 
             <div className="bg-white p-6 rounded-3xl shadow-sm border border-slate-100 flex flex-col gap-5 relative">
-              <h2 className="font-bold text-lg text-slate-800 border-b pb-2 mb-2">Datos del Trabajador</h2>
+              <h2 className="font-bold text-lg text-slate-800 border-b pb-2 mb-2">Datos del Vendedor / Cliente</h2>
               
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div className="md:col-span-2 relative">
-                  <label className="block text-xs font-bold text-slate-500 mb-1 uppercase tracking-wider">Nombre Completo</label>
-                  <input 
-                    type="text" 
-                    value={busquedaVendedor} 
-                    onFocus={() => setMostrarSugerencias(true)}
-                    onChange={(e) => {
-                      setBusquedaVendedor(e.target.value);
-                      setMostrarSugerencias(true);
-                      setDatosVenta(prev => ({ ...prev, nombre: '', codigoEmpleado: '' }));
-                    }} 
-                    placeholder="Escribe tu nombre para buscar..." 
-                    className="w-full bg-slate-50 border border-slate-200 rounded-lg px-4 py-3 focus:ring-2 focus:ring-blue-500 outline-none font-medium" 
-                  />
-                  {datosVenta.nombre && <span className="absolute right-3 top-9 text-green-500 font-bold text-sm bg-white px-2 py-1">✓ Seleccionado</span>}
-
+                  <label className="block text-xs font-bold text-slate-500 mb-1 uppercase tracking-wider">Nombre Completo (Obligatorio)</label>
+                  <input type="text" value={busquedaVendedor} onFocus={() => setMostrarSugerencias(true)} onChange={(e) => { setBusquedaVendedor(e.target.value); setMostrarSugerencias(true); setDatosVenta(prev => ({ ...prev, nombre: '', codigoEmpleado: '' })); }} placeholder="Escribe tu nombre para buscar..." className="w-full bg-slate-50 border border-slate-200 rounded-lg px-4 py-3 focus:outline-none focus:ring-2 focus:ring-blue-500 font-medium text-slate-800"/>
+                  {datosVenta.nombre && <span className="absolute right-3 top-9 text-green-500 font-bold text-sm bg-white px-2 py-1 rounded">✓ Confirmado</span>}
                   {mostrarSugerencias && busquedaVendedor.length > 0 && !datosVenta.nombre && (
                     <ul className="absolute z-50 w-full bg-white border border-slate-200 mt-1 rounded-lg shadow-xl max-h-48 overflow-y-auto">
-                      {vendedoresBD
-                        .filter(v => v.nombre_completo.toLowerCase().includes(busquedaVendedor.toLowerCase()))
-                        .slice(0, 10)
-                        .map(v => (
-                          <li key={v.codigo_empleado} onClick={() => {
-                              setBusquedaVendedor(v.nombre_completo);
-                              setDatosVenta(prev => ({ ...prev, nombre: v.nombre_completo, codigoEmpleado: v.codigo_empleado }));
-                              setMostrarSugerencias(false);
-                            }}
-                            className="px-4 py-3 hover:bg-blue-50 cursor-pointer border-b last:border-0"
-                          >
-                            <div className="font-bold text-slate-700">{v.nombre_completo}</div>
-                            <div className="text-xs text-slate-500">Cód: {v.codigo_empleado}</div>
-                          </li>
-                        ))
-                      }
+                      {vendedoresBD.filter(v => v.nombre_completo.toLowerCase().includes(busquedaVendedor.toLowerCase())).slice(0, 15).map(v => (
+                        <li key={v.codigo_empleado} onClick={() => { setBusquedaVendedor(v.nombre_completo); setDatosVenta(prev => ({ ...prev, nombre: v.nombre_completo, codigoEmpleado: v.codigo_empleado })); setMostrarSugerencias(false); }} className="px-4 py-3 hover:bg-blue-50 cursor-pointer border-b border-slate-100 last:border-0">
+                          <div className="font-bold text-slate-700">{v.nombre_completo}</div>
+                          <div className="text-xs text-slate-500">Cód: {v.codigo_empleado}</div>
+                        </li>
+                      ))}
+                      {vendedoresBD.filter(v => v.nombre_completo.toLowerCase().includes(busquedaVendedor.toLowerCase())).length === 0 && (
+                        <li className="px-4 py-3 text-slate-500 text-sm italic">No se encontraron vendedores.</li>
+                      )}
                     </ul>
                   )}
                 </div>
 
                 <div>
-                  <label className="block text-xs font-bold text-slate-500 mb-1 uppercase tracking-wider">Lugar</label>
-                  <select name="lugar" value={datosVenta.lugar} onChange={manejarCambioInput} className="w-full bg-slate-50 border border-slate-200 rounded-lg px-4 py-3 outline-none">
-                    <option value="">Seleccione...</option>
+                  <label className="block text-xs font-bold text-slate-500 mb-1 uppercase tracking-wider">Lugar (Obligatorio)</label>
+                  <select name="lugar" value={datosVenta.lugar} onChange={manejarCambioInput} className="w-full bg-slate-50 border border-slate-200 rounded-lg px-4 py-3 focus:outline-none focus:ring-2 focus:ring-blue-500 font-medium text-slate-800">
+                    <option value="">Seleccione un lugar...</option>
                     <option value="Sala de ventas Norte (Callao)">Sala de ventas Norte (Callao)</option>
                     <option value="Sala de ventas Sur (Chorrillos)">Sala de ventas Sur (Chorrillos)</option>
+                    <option value="Sala de ventas Este (La Molina)">Sala de ventas Este (La Molina)</option>
                     <option value="Cromo (San isidro)">Cromo (San isidro)</option>
                   </select>
                 </div>
 
                 <div>
-                  <label className="block text-xs font-bold text-slate-500 mb-1 uppercase tracking-wider">Código</label>
-                  <input type="text" value={datosVenta.codigoEmpleado} readOnly className="w-full bg-slate-100 border border-slate-200 rounded-lg px-4 py-3 font-bold text-blue-600" />
+                  <label className="block text-xs font-bold text-slate-500 mb-1 uppercase tracking-wider">Código Empleado</label>
+                  <input type="text" value={datosVenta.codigoEmpleado} readOnly placeholder="Se llena automáticamente" className="w-full bg-slate-100 border border-slate-200 rounded-lg px-4 py-3 font-bold text-blue-600 cursor-not-allowed"/>
                 </div>
 
                 <div className="md:col-span-2">
-                  <label className="block text-xs font-bold text-slate-500 mb-1 uppercase tracking-wider">Correo para confirmación</label>
-                  <input type="email" name="correo" value={datosVenta.correo} onChange={manejarCambioInput} placeholder="usuario@empresa.com" className="w-full bg-slate-50 border border-slate-200 rounded-lg px-4 py-3 outline-none" />
+                  <label className="block text-xs font-bold text-slate-500 mb-1 uppercase tracking-wider">Correo Electrónico</label>
+                  <input type="email" name="correo" value={datosVenta.correo} onChange={manejarCambioInput} placeholder="Ej: usuario@empresa.com" className="w-full bg-slate-50 border border-slate-200 rounded-lg px-4 py-3 focus:outline-none focus:ring-2 focus:ring-blue-500 font-medium text-slate-800"/>
                 </div>
               </div>
 
               <div className="mt-2">
                 <label className="block text-xs font-bold text-slate-500 mb-2 uppercase tracking-wider">Comprobante de Pago</label>
-                <label className={`border-2 border-dashed rounded-xl p-4 text-center cursor-pointer block ${comprobante ? 'border-green-400 bg-green-50' : 'border-slate-300'}`}>
-                  {comprobante ? <p className="text-sm text-green-700 font-bold truncate">✓ {comprobante.name}</p> : <p className="text-sm text-slate-600">📸 Subir Foto de Comprobante</p>}
-                  <input type="file" accept="image/*" className="hidden" onChange={(e) => { if (e.target.files && e.target.files[0]) setComprobante(e.target.files[0]); }} />
+                <label className={`border-2 border-dashed rounded-xl p-4 text-center hover:bg-slate-50 cursor-pointer block ${comprobante ? 'border-green-400 bg-green-50/30' : 'border-slate-300'}`}>
+                  {comprobante ? (<><span className="text-3xl mb-1 block">✅</span><p className="text-sm text-green-700 font-bold truncate px-4">{comprobante.name}</p></>) : (<><span className="text-2xl mb-1 block">📸</span><p className="text-sm text-slate-600 font-bold">Subir Yape / Transferencia</p></>)}
+                  <input type="file" accept="image/*" className="hidden" onChange={(e) => { if (e.target.files && e.target.files[0]) setComprobante(e.target.files[0]); }}/>
                 </label>
               </div>
 
-              <button onClick={procesarPedido} disabled={guardando} className="w-full bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 text-white font-black py-4 rounded-xl shadow-lg transition-all mt-4 text-lg">
-                {guardando ? 'Sincronizando...' : 'Confirmar Venta ✓'}
+              <button onClick={procesarPedido} disabled={guardando} className="w-full bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 text-white font-black py-4 rounded-xl shadow-lg transition-all mt-auto text-lg flex justify-center items-center gap-2">
+                {guardando ? 'Guardando...' : 'Confirmar y Registrar Venta ✓'}
               </button>
             </div>
           </div>
@@ -461,75 +735,135 @@ export default function Home() {
     );
   }
 
-  // VISTA 3: EL CATÁLOGO
+  // ==========================================
+  // VISTA CATÁLOGO
+  // ==========================================
   return (
     <main className="min-h-screen bg-slate-50 pb-20">
+
       <header className="bg-white shadow-sm sticky top-0 z-40">
         <div className="max-w-7xl mx-auto px-4 h-20 flex items-center justify-between">
           <div className="flex items-center gap-4">
-            <button onClick={() => setRegionSeleccionada(null)} className="p-2 hover:bg-slate-100 rounded-full text-slate-500">← Volver</button>
+            <button onClick={() => { setRegionSeleccionada(null); setPantalla('catalogo'); }} className="p-2 hover:bg-slate-100 rounded-full text-slate-500 transition-colors">← Volver</button>
             <div>
               <h1 className="text-xl font-bold text-slate-800">Catálogo CBC</h1>
               <p className="text-sm text-blue-600 font-semibold">📍 Región {regionSeleccionada}</p>
             </div>
           </div>
-          <button onClick={() => setMostrarCarrito(true)} className={`px-4 py-2 rounded-lg font-bold flex items-center gap-2 ${totalPagar > 0 ? 'bg-green-100 text-green-800' : 'bg-blue-100 text-blue-800'}`}>
-            <span>🛒 S/ {totalPagar.toFixed(2)}</span>
+          <button onClick={() => setMostrarCarrito(true)} className={`px-4 py-2 rounded-lg font-bold transition-all flex items-center gap-2 hover:shadow-md ${totalPagar > 0 ? 'bg-green-100 text-green-800 scale-105 shadow-sm' : 'bg-blue-100 text-blue-800'}`}>
+            <span>🛒</span> <span>S/ {totalPagar.toFixed(2)}</span>
           </button>
         </div>
       </header>
 
+      <div style={{background: '#ffffff', borderBottom: '1px solid #e2e8f0', padding: '14px 0', position: 'sticky', top: '80px', zIndex: 30, boxShadow: '0 2px 8px rgba(0,0,0,0.05)'}}>
+        <div className="max-w-7xl mx-auto px-4" style={{display: 'flex', gap: '12px', alignItems: 'center', flexWrap: 'wrap'}}>
+          
+          <div style={{display: 'flex', gap: '8px', flexWrap: 'wrap'}}>
+            {[
+              {key: 'Todos', label: '🏪 Todos'},
+              {key: 'La Bodeguita', label: '🏪 La Bodeguita'},
+              {key: 'More', label: '🍬 More'},
+              {key: 'DIAGEO', label: '🥃 Diageo'},
+            ].map(cat => (
+              <button key={cat.key} onClick={() => setCategoriaFiltro(cat.key)} style={{padding: '8px 16px', borderRadius: '20px', border: 'none', cursor: 'pointer', fontSize: '13px', fontWeight: 700, transition: 'all 0.2s', background: categoriaFiltro === cat.key ? '#0f172a' : '#f1f5f9', color: categoriaFiltro === cat.key ? '#ffffff' : '#64748b', boxShadow: categoriaFiltro === cat.key ? '0 2px 8px rgba(0,0,0,0.15)' : 'none'}}>
+                {cat.label}
+              </button>
+            ))}
+          </div>
+
+          <div style={{flex: 1, minWidth: '220px', position: 'relative'}}>
+            <span style={{position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)', fontSize: '15px', pointerEvents: 'none'}}>🔍</span>
+            <input type="text" value={busquedaProducto} onChange={e => setBusquedaProducto(e.target.value)} placeholder="Buscar por nombre o código de producto..." style={{width: '100%', padding: '10px 40px 10px 38px', borderRadius: '10px', border: '1px solid #e2e8f0', fontSize: '14px', outline: 'none', background: '#f8fafc', boxSizing: 'border-box', fontFamily: 'inherit'}}/>
+            {busquedaProducto && (
+              <button onClick={() => setBusquedaProducto('')} style={{position: 'absolute', right: '12px', top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', cursor: 'pointer', color: '#94a3b8', fontSize: '16px', padding: 0}}>✕</button>
+            )}
+          </div>
+        </div>
+
+        {busquedaProducto && (
+          <div className="max-w-7xl mx-auto px-4" style={{marginTop: '8px'}}>
+            <p style={{fontSize: '12px', color: '#64748b', margin: 0}}>
+              {productosFiltrados.length === 0 ? '❌ No se encontraron productos' : `✅ ${productosFiltrados.length} producto${productosFiltrados.length !== 1 ? 's' : ''} encontrado${productosFiltrados.length !== 1 ? 's' : ''}`}
+            </p>
+          </div>
+        )}
+      </div>
+
       <div className="max-w-7xl mx-auto px-4 py-8">
         {productosBodeguita.length > 0 && (
           <div className="mb-12">
-            <h2 className="text-2xl font-black text-slate-800 mb-6 flex items-center gap-2">🏪 La Bodeguita</h2>
+            <h2 className="text-2xl font-black text-slate-800 mb-6 flex items-center gap-2"><span className="bg-orange-100 text-orange-600 p-2 rounded-lg text-sm">🏪</span> La Bodeguita</h2>
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-              {productosBodeguita.map((prod) => <TarjetaProducto key={prod.material_id} producto={prod} carrito={carrito} onActualizar={actualizarCantidad} />)}
+              {productosBodeguita.map((prod) => <TarjetaProducto key={prod.material_id} producto={prod} carrito={carrito} onActualizar={actualizarCantidad}/>)}
             </div>
           </div>
         )}
         {productosMore.length > 0 && (
           <div className="mb-12">
-            <h2 className="text-2xl font-black text-slate-800 mb-6 flex items-center gap-2">🍬 Gomitas More</h2>
+            <h2 className="text-2xl font-black text-slate-800 mb-6 flex items-center gap-2"><span className="bg-purple-100 text-purple-600 p-2 rounded-lg text-sm">🍬</span> Gomitas More</h2>
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-              {productosMore.map((prod) => <TarjetaProducto key={prod.material_id} producto={prod} carrito={carrito} onActualizar={actualizarCantidad} />)}
+              {productosMore.map((prod) => <TarjetaProducto key={prod.material_id} producto={prod} carrito={carrito} onActualizar={actualizarCantidad}/>)}
             </div>
           </div>
         )}
         {productosDiageo.length > 0 && (
           <div className="mb-12">
-            <h2 className="text-2xl font-black text-slate-800 mb-6 flex items-center gap-2">🥃 Licores Diageo</h2>
+            <h2 className="text-2xl font-black text-slate-800 mb-6 flex items-center gap-2"><span className="bg-amber-100 text-amber-600 p-2 rounded-lg text-sm">🥃</span> Licores Diageo</h2>
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-              {productosDiageo.map((prod) => <TarjetaProducto key={prod.material_id} producto={prod} carrito={carrito} onActualizar={actualizarCantidad} />)}
+              {productosDiageo.map((prod) => <TarjetaProducto key={prod.material_id} producto={prod} carrito={carrito} onActualizar={actualizarCantidad}/>)}
             </div>
+          </div>
+        )}
+
+        {productosFiltrados.length === 0 && (
+          <div className="text-center py-20">
+            <p className="text-6xl mb-4">🔍</p>
+            <p className="text-xl font-bold text-slate-600 mb-2">No se encontraron productos</p>
+            <p className="text-slate-400 mb-6">Intenta con otro nombre, código o categoría</p>
+            <button onClick={() => { setBusquedaProducto(''); setCategoriaFiltro('Todos'); }} className="px-6 py-3 bg-blue-600 text-white rounded-xl font-bold hover:bg-blue-700 transition-colors">
+              Limpiar filtros
+            </button>
           </div>
         )}
       </div>
 
       {mostrarCarrito && (
-        <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-white w-full sm:w-[450px] rounded-3xl shadow-2xl flex flex-col max-h-[80vh]">
-            <div className="px-6 py-4 border-b flex justify-between items-center bg-slate-50 rounded-t-3xl">
-              <h3 className="font-black text-xl text-slate-800">🛒 Carrito</h3>
-              <button onClick={() => setMostrarCarrito(false)} className="text-slate-400 font-bold">✕</button>
+        <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-50 flex items-end sm:items-center justify-center p-0 sm:p-4">
+          <div className="bg-white w-full sm:w-[500px] rounded-t-3xl sm:rounded-3xl shadow-2xl flex flex-col max-h-[90vh] sm:max-h-[80vh]">
+            <div className="px-6 py-4 border-b border-slate-100 flex justify-between items-center bg-slate-50 rounded-t-3xl">
+              <h3 className="font-black text-xl text-slate-800">🛒 Tu Pedido</h3>
+              <button onClick={() => setMostrarCarrito(false)} className="bg-slate-200 hover:bg-slate-300 text-slate-600 w-8 h-8 rounded-full font-bold flex items-center justify-center">✕</button>
             </div>
             <div className="p-6 overflow-y-auto flex-1">
-              {carrito.map((item) => (
-                <div key={item.material_id} className="flex justify-between items-center mb-4 pb-4 border-b border-slate-50">
-                  <div>
-                    <p className="font-bold text-slate-800 text-sm">{item.descripcion}</p>
-                    <p className="text-xs text-blue-600 font-bold">{item.cantidad} und x S/ {item.precio_unitario.toFixed(2)}</p>
-                  </div>
-                  <p className="font-black text-slate-800">S/ {(item.cantidad * item.precio_unitario).toFixed(2)}</p>
+              {carrito.length === 0 ? (
+                <div className="text-center text-slate-400 py-10"><p className="text-4xl mb-3">📦</p><p className="font-medium">Tu carrito está vacío</p></div>
+              ) : (
+                <div className="flex flex-col gap-4">
+                  {carrito.map((item) => (
+                    <div key={item.material_id} className="flex justify-between items-start border-b border-slate-100 pb-4">
+                      <div className="flex-1 pr-4">
+                        <p className="font-bold text-slate-800 text-sm mb-1">{item.descripcion}</p>
+                        <div className="flex items-center gap-2">
+                          <span className="bg-blue-50 text-blue-700 font-bold px-2 py-1 rounded-md text-xs">{item.cantidad} und</span>
+                          <span className="text-slate-400 text-xs">x</span>
+                          <span className="text-slate-700 font-bold text-sm">S/ {item.precio_unitario.toFixed(2)}</span>
+                        </div>
+                      </div>
+                      <div className="font-black text-blue-700 text-lg">S/ {(item.cantidad * item.precio_unitario).toFixed(2)}</div>
+                    </div>
+                  ))}
                 </div>
-              ))}
+              )}
             </div>
-            <div className="p-6 border-t">
-              <div className="flex justify-between mb-4">
-                <span className="font-bold">Total:</span>
-                <span className="text-2xl font-black text-green-600">S/ {totalPagar.toFixed(2)}</span>
+            <div className="p-6 border-t border-slate-100 bg-white sm:rounded-b-3xl">
+              <div className="flex justify-between items-end mb-4">
+                <span className="text-slate-500 font-bold">Total a pagar:</span>
+                <span className="text-3xl font-black text-green-600">S/ {totalPagar.toFixed(2)}</span>
               </div>
-              <button onClick={() => { setMostrarCarrito(false); setPantalla('checkout'); }} className="w-full bg-slate-900 text-white font-black py-4 rounded-xl shadow-lg">Registrar Venta →</button>
+              <button disabled={carrito.length === 0} onClick={() => { setMostrarCarrito(false); setPantalla('checkout'); }} className="w-full bg-slate-900 text-white font-black py-4 rounded-xl disabled:bg-slate-200 disabled:text-slate-400 hover:bg-blue-600 transition-colors shadow-lg">
+                Siguiente: Confirmar Pedido →
+              </button>
             </div>
           </div>
         </div>
@@ -544,24 +878,25 @@ function TarjetaProducto({ producto, carrito, onActualizar }: { producto: Produc
   const cantidadPedida = itemEnCarrito ? itemEnCarrito.cantidad : 0;
 
   return (
-    <div className={`bg-white rounded-2xl p-5 shadow-sm border transition-all h-full flex flex-col ${cantidadPedida > 0 ? 'border-blue-400 ring-1 ring-blue-400' : 'border-slate-100'}`}>
+    <div className={`bg-white rounded-2xl p-5 shadow-sm hover:shadow-xl transition-all border flex flex-col h-full group ${cantidadPedida > 0 ? 'border-blue-400 ring-1 ring-blue-400' : 'border-slate-100'}`}>
       <div className="flex justify-between items-start mb-4">
         <span className="text-xs font-mono bg-slate-100 text-slate-500 px-2 py-1 rounded-md">{producto.material_id}</span>
         <span className={`text-xs font-bold px-2 py-1 rounded-md ${tieneStock ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>Stock: {producto.stock}</span>
       </div>
-      <div className="mt-auto">
-        <h3 className="font-bold text-slate-800 text-sm mb-4 leading-tight h-10 line-clamp-2">{producto.descripcion}</h3>
-        <p className="text-2xl font-black text-blue-700 mb-4">S/ {Number(producto.precio_unitario).toFixed(2)}</p>
-        
+      <div className="mt-auto pt-4 border-t border-slate-50">
+        <h3 className="font-bold text-slate-800 text-sm mb-3 line-clamp-2 leading-tight">{producto.descripcion}</h3>
+        <div className="flex items-center justify-between mb-4">
+          <span className="text-2xl font-black text-blue-700">S/ {Number(producto.precio_unitario).toFixed(2)}</span>
+        </div>
         {!tieneStock ? (
-          <button disabled className="w-full py-3 rounded-xl font-bold bg-slate-100 text-slate-400">Agotado</button>
+          <button disabled className="w-full py-3 rounded-xl font-bold bg-slate-100 text-slate-400 cursor-not-allowed">Agotado</button>
         ) : cantidadPedida === 0 ? (
-          <button onClick={() => onActualizar(producto, 1)} className="w-full py-3 rounded-xl font-bold bg-slate-900 text-white hover:bg-blue-600 transition-colors">+ Añadir</button>
+          <button onClick={() => onActualizar(producto, 1)} className="w-full py-3 rounded-xl font-bold flex items-center justify-center gap-2 transition-all bg-slate-900 text-white hover:bg-blue-600 hover:shadow-lg hover:-translate-y-1">+ Añadir</button>
         ) : (
           <div className="flex items-center justify-between w-full bg-blue-50 rounded-xl overflow-hidden border border-blue-200">
-            <button onClick={() => onActualizar(producto, -1)} className="w-1/3 py-3 font-black text-blue-700 hover:bg-blue-100">-</button>
-            <span className="w-1/3 text-center font-black text-blue-900">{cantidadPedida}</span>
-            <button onClick={() => onActualizar(producto, 1)} disabled={cantidadPedida >= producto.stock} className="w-1/3 py-3 font-black text-blue-700 hover:bg-blue-100">+</button>
+            <button onClick={() => onActualizar(producto, -1)} className="w-1/3 py-3 font-black text-blue-700 hover:bg-blue-200 transition-colors text-lg">-</button>
+            <span className="w-1/3 text-center font-black text-blue-900 text-lg">{cantidadPedida}</span>
+            <button onClick={() => onActualizar(producto, 1)} disabled={cantidadPedida >= producto.stock} className={`w-1/3 py-3 font-black text-lg transition-colors ${cantidadPedida >= producto.stock ? 'text-blue-300 cursor-not-allowed' : 'text-blue-700 hover:bg-blue-200'}`}>+</button>
           </div>
         )}
       </div>
