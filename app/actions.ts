@@ -24,12 +24,12 @@ export interface PedidoExistenteItem {
   descripcion: string;
   cantidad: number;
   precio_total: number;
-  precio_unitario: number; 
+  precio_unitario: number;
   agencia: string;
   estado: string;
   nombre_cliente: string;
   comprobante_url: string;
-  stock_actual: number; 
+  stock_actual: number;
 }
 
 export async function obtenerStockPorRegion(region: string): Promise<ProductoStock[]> {
@@ -133,7 +133,7 @@ export async function actualizarPedido(datos: {
     for (const item of datos.items) {
       const nuevoPrecioTotal = item.cantidad_nueva * item.precio_unitario;
       const diferenciaCantidad = item.cantidad_nueva - item.cantidad_antigua;
-      
+
       // Armamos el ID exacto que tiene la BD para actualizar la fila correcta
       const idDbExacto = `${datos.pedidoId}-${item.material_id}`;
 
@@ -306,5 +306,107 @@ export async function enviarCorreoConfirmacion(datos: {
   } catch (error) {
     console.error("❌ Error enviando correo:", error);
     return { exito: false, error: (error as any).message };
+  }
+}
+
+export interface PedidoCompleto {
+  pedido_id: string;
+  fecha: string;
+  hora: string;
+  nombre_cliente: string;
+  agencia: string;
+  correo: string;
+  material_id: string;
+  descripcion: string;
+  cantidad: number;
+  precio_total: number;
+  estado: string;
+  codigo_empleado: string;
+  comprobante_url: string;
+}
+
+export async function obtenerTodosLosPedidos(): Promise<PedidoCompleto[]> {
+  try {
+    const { rows } = await sql<any>`
+      SELECT * FROM registro_pedidos
+      ORDER BY fecha DESC, hora DESC;
+    `;
+
+    // Aseguramos que fecha y hora sean strings, ya que Postgres puede devolver objetos Date
+    // y React no puede renderizar objetos Date directamente.
+    const pedidosFormateados = rows.map(row => ({
+      ...row,
+      fecha: row.fecha instanceof Date ? row.fecha.toISOString().split('T')[0] : String(row.fecha),
+      hora: row.hora instanceof Date ? row.hora.toISOString().split('T')[1]?.substring(0, 8) || String(row.hora) : String(row.hora)
+    }));
+
+    return pedidosFormateados as PedidoCompleto[];
+  } catch (error) {
+    console.error("🔥 Error obteniendo todos los pedidos:", error);
+    return [];
+  }
+}
+
+export async function actualizarEstadoPedido(pedidoId: string, nuevoEstado: string) {
+  try {
+    // Usamos LIKE para abarcar todos los items que compartan el ID del pedido (ej. PED-123%)
+    const idDbExacto = `${pedidoId}%`;
+
+    // 1. Obtener los items y su estado actual
+    const { rows: itemsActuales } = await sql<any>`
+      SELECT material_id, cantidad, estado 
+      FROM registro_pedidos 
+      WHERE pedido_id LIKE ${idDbExacto};
+    `;
+
+    if (itemsActuales.length === 0) {
+      return { exito: false, error: "Pedido no encontrado en la base de datos" };
+    }
+
+    const estadoAnterior = itemsActuales[0].estado;
+
+    // 2. Si pasa a RECHAZADO, devolver stock
+    if (nuevoEstado === 'RECHAZADO' && estadoAnterior !== 'RECHAZADO') {
+      for (const item of itemsActuales) {
+        await sql`
+          UPDATE stock_disponible
+          SET stock = stock + ${item.cantidad}
+          WHERE material_id = ${item.material_id};
+        `;
+      }
+    }
+    // 3. Si estaba RECHAZADO y pasa a otro estado, verificar y restar stock
+    else if (estadoAnterior === 'RECHAZADO' && nuevoEstado !== 'RECHAZADO') {
+      // Validar stock primero para todos los items
+      for (const item of itemsActuales) {
+        const { rows: stockQuery } = await sql<any>`
+          SELECT stock FROM stock_disponible WHERE material_id = ${item.material_id};
+        `;
+        if (stockQuery.length === 0 || stockQuery[0].stock < item.cantidad) {
+          return { exito: false, error: `Stock insuficiente para volver a aprobar el producto ID: ${item.material_id}` };
+        }
+      }
+
+      // Si hay stock suficiente para todo, restarlo
+      for (const item of itemsActuales) {
+        await sql`
+          UPDATE stock_disponible
+          SET stock = stock - ${item.cantidad}
+          WHERE material_id = ${item.material_id};
+        `;
+      }
+    }
+
+    // 4. Actualizar estado
+    await sql`
+      UPDATE registro_pedidos
+      SET estado = ${nuevoEstado}
+      WHERE pedido_id LIKE ${idDbExacto};
+    `;
+
+    return { exito: true };
+  } catch (error) {
+    console.error("🔥 Error actualizando estado de pedido:", error);
+    return { exito: false, error: error instanceof Error ? error.message : "Fallo al actualizar el estado" };
   }
 }
