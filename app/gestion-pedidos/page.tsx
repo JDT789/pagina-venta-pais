@@ -1,6 +1,8 @@
 import { obtenerTodosLosPedidos } from "../actions";
 import GestionPedidosClient from "@/app/gestion-pedidos/GestionPedidosClient";
 
+export const dynamic = 'force-dynamic';
+
 export default async function GestionPedidosPage() {
   const pedidos = await obtenerTodosLosPedidos();
 
