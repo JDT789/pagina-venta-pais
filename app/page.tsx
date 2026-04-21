@@ -14,21 +14,21 @@ export default function Home() {
   const [regionSeleccionada, setRegionSeleccionada] = useState<string | null>(null);
   const [stockReal, setStockReal] = useState<ProductoStock[]>([]);
   const [cargando, setCargando] = useState(false);
-  
+
   const [carrito, setCarrito] = useState<ItemCarrito[]>([]);
   const [mostrarCarrito, setMostrarCarrito] = useState(false);
   const [pantalla, setPantalla] = useState<'catalogo' | 'checkout' | 'modificar'>('catalogo');
 
   const [comprobante, setComprobante] = useState<File | null>(null);
   const [guardando, setGuardando] = useState(false);
-  
+
   const [vendedoresBD, setVendedoresBD] = useState<Vendedor[]>([]);
   const [busquedaVendedor, setBusquedaVendedor] = useState('');
   const [mostrarSugerencias, setMostrarSugerencias] = useState(false);
 
   const [datosVenta, setDatosVenta] = useState({
     nombre: '',
-    lugar: '', 
+    lugar: '',
     correo: '',
     codigoEmpleado: ''
   });
@@ -49,7 +49,7 @@ export default function Home() {
   const cargarDatos = async (region: string) => {
     setRegionSeleccionada(region);
     setCargando(true);
-    setCarrito([]); 
+    setCarrito([]);
     setMostrarCarrito(false);
     setPantalla('catalogo');
     setComprobante(null);
@@ -57,7 +57,7 @@ export default function Home() {
     setBusquedaVendedor('');
     setBusquedaProducto('');
     setCategoriaFiltro('Todos');
-    
+
     try {
       const [datosStock, datosVendedores] = await Promise.all([
         obtenerStockPorRegion(region),
@@ -75,13 +75,13 @@ export default function Home() {
   const actualizarCantidad = (producto: ProductoStock, cambio: number) => {
     setCarrito((carritoActual) => {
       const itemExistente = carritoActual.find(item => item.material_id === producto.material_id);
-      
+
       if (itemExistente) {
         const nuevaCantidad = itemExistente.cantidad + cambio;
-        
+
         if (nuevaCantidad > producto.stock) {
-            alert(`⚠️ ALERTA DE INVENTARIO: No hay suficiente stock. Solo quedan ${producto.stock} unidades disponibles en el almacén.`);
-            return carritoActual;
+          alert(`⚠️ ALERTA DE INVENTARIO: No hay suficiente stock. Solo quedan ${producto.stock} unidades disponibles en el almacén.`);
+          return carritoActual;
         }
 
         if (nuevaCantidad <= 0) return carritoActual.filter(item => item.material_id !== producto.material_id);
@@ -194,26 +194,26 @@ export default function Home() {
     setCantidadesModificadasMap({});
     setComprobanteModificado(null);
     setLugarModificado('');
-    
+
     try {
       const itemsPedido = await obtenerPedidoPorId(idPedidoModificar);
       if (!itemsPedido || itemsPedido.length === 0) {
         alert("❌ No se encontró ningún pedido con ese ID.");
         return;
       }
-      
+
       setItemsPedidoOriginal(itemsPedido);
-      setLugarModificado(itemsPedido[0].agencia); 
-      
+      setLugarModificado(itemsPedido[0].agencia);
+
       const mapaInicialQuantities: Record<string, number> = {};
       itemsPedido.forEach(item => {
         mapaInicialQuantities[item.material_id] = item.cantidad;
       });
       setCantidadesModificadasMap(mapaInicialQuantities);
-      
+
       setModalModificar(false);
       setPantalla('modificar');
-      
+
     } catch (error) {
       console.error(error);
       alert("❌ Error buscando el pedido. Revisa tu conexión.");
@@ -229,11 +229,11 @@ export default function Home() {
     setCantidadesModificadasMap(prev => {
       const cantidadActual = prev[materialId] || itemOriginal.cantidad;
       const nuevaCantidad = cantidadActual + cambio;
-      
+
       if (nuevaCantidad <= 0) return prev;
 
       const maximoPermitido = Number(itemOriginal.stock_actual) + Number(itemOriginal.cantidad);
-      
+
       if (nuevaCantidad > maximoPermitido) {
         alert(`⚠️ LÍMITE ALCANZADO: Solo hay ${itemOriginal.stock_actual} unidades extras disponibles en almacén. No puedes llevar más de ${maximoPermitido} en total.`);
         return prev;
@@ -252,12 +252,12 @@ export default function Home() {
       return;
     }
     if (itemsPedidoOriginal.length === 0) return;
-    
+
     setGuardando(true);
-    
+
     try {
-      let comprobanteUrlFinal = itemsPedidoOriginal[0].comprobante_url; 
-      
+      let comprobanteUrlFinal = itemsPedidoOriginal[0].comprobante_url;
+
       if (comprobanteModificado) {
         const formData = new FormData();
         formData.append('file', comprobanteModificado);
@@ -273,31 +273,31 @@ export default function Home() {
         const uploadData = await uploadRes.json();
         comprobanteUrlFinal = uploadData.secure_url;
       }
-      
+
       const itemsToUpdate = itemsPedidoOriginal.map(itemOriginal => ({
         material_id: itemOriginal.material_id,
-        cantidad_nueva: cantidadesModificadasMap[itemOriginal.material_id], 
+        cantidad_nueva: cantidadesModificadasMap[itemOriginal.material_id],
         cantidad_antigua: itemOriginal.cantidad,
         precio_unitario: Number(itemOriginal.precio_unitario)
       }));
-      
+
       const respuesta = await actualizarPedido({
         pedidoId: idPedidoModificar,
         lugar: lugarModificado,
         comprobanteUrl: comprobanteUrlFinal,
         items: itemsToUpdate
       });
-      
+
       if (!respuesta.exito) throw new Error(respuesta.error);
-      
+
       alert(`✅ ¡Inventario reajustado! Pedido ${idPedidoModificar} actualizado con éxito.`);
-      
+
       setIdPedidoModificar('');
       setItemsPedidoOriginal([]);
       setCantidadesModificadasMap({});
       setComprobanteModificado(null);
       setPantalla('catalogo');
-      
+
     } catch (error) {
       console.error(error);
       alert("❌ Hubo un error al guardar los cambios en la base de datos.");
@@ -319,8 +319,8 @@ export default function Home() {
 
   if (!regionSeleccionada && pantalla !== 'modificar') {
     return (
-      <main className="min-h-screen overflow-hidden antialiased" style={{background: 'linear-gradient(135deg, #0a0f1e 0%, #0d1b3e 50%, #0a1628 100%)'}}>
-        
+      <main className="min-h-screen overflow-hidden antialiased" style={{ background: 'linear-gradient(135deg, #0a0f1e 0%, #0d1b3e 50%, #0a1628 100%)' }}>
+
         <style>{`
           @import url('https://fonts.googleapis.com/css2?family=Syne:wght@700;800&family=DM+Sans:wght@400;500;700&display=swap');
           
@@ -331,11 +331,13 @@ export default function Home() {
           @keyframes spinSlow { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
           @keyframes float { 0%, 100% { transform: translateY(0px); } 50% { transform: translateY(-12px); } }
           @keyframes shimmer { 0% { background-position: -200% center; } 100% { background-position: 200% center; } }
+          @keyframes spinSettle { 0% { opacity: 0; transform: scale(0.5) rotate(-180deg); } 100% { opacity: 1; transform: scale(1) rotate(0deg); } }
           .badge { animation: fadeUp 0.6s ease forwards; opacity: 0; animation-delay: 0.1s; }
           .hero-title { animation: fadeUp 0.7s ease forwards; opacity: 0; animation-delay: 0.25s; }
           .hero-sub { animation: fadeUp 0.7s ease forwards; opacity: 0; animation-delay: 0.4s; }
           .hero-btns { animation: fadeUp 0.7s ease forwards; opacity: 0; animation-delay: 0.55s; }
           .hero-logo { animation: fadeIn 1s ease forwards; opacity: 0; animation-delay: 0.3s; }
+          .hero-main-logo { animation: spinSettle 1.2s cubic-bezier(0.34, 1.56, 0.64, 1) forwards; opacity: 0; animation-delay: 0.25s; }
           .logo-float { animation: float 5s ease-in-out infinite; }
           .ring-spin { animation: spinSlow 20s linear infinite; }
           .shimmer-text { background: linear-gradient(90deg, #06b6d4, #ffffff, #06b6d4, #a78bfa); background-size: 200% auto; -webkit-background-clip: text; -webkit-text-fill-color: transparent; animation: shimmer 4s linear infinite; }
@@ -350,117 +352,97 @@ export default function Home() {
         `}</style>
 
         <div className="fixed inset-0 pointer-events-none overflow-hidden">
-          <div style={{position: 'absolute', top: '-20%', left: '-10%', width: '600px', height: '600px', borderRadius: '50%', background: 'radial-gradient(circle, rgba(6,182,212,0.08) 0%, transparent 70%)', animation: 'pulse 8s ease-in-out infinite'}}/>
-          <div style={{position: 'absolute', bottom: '-10%', right: '-10%', width: '500px', height: '500px', borderRadius: '50%', background: 'radial-gradient(circle, rgba(168,85,247,0.06) 0%, transparent 70%)', animation: 'pulse 10s ease-in-out infinite reverse'}}/>
-          <div style={{position: 'absolute', inset: 0, backgroundImage: 'linear-gradient(rgba(255,255,255,0.02) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.02) 1px, transparent 1px)', backgroundSize: '60px 60px'}}/>
+          <div style={{ position: 'absolute', top: '-20%', left: '-10%', width: '600px', height: '600px', borderRadius: '50%', background: 'radial-gradient(circle, rgba(6,182,212,0.08) 0%, transparent 70%)', animation: 'pulse 8s ease-in-out infinite' }} />
+          <div style={{ position: 'absolute', bottom: '-10%', right: '-10%', width: '500px', height: '500px', borderRadius: '50%', background: 'radial-gradient(circle, rgba(168,85,247,0.06) 0%, transparent 70%)', animation: 'pulse 10s ease-in-out infinite reverse' }} />
+          <div style={{ position: 'absolute', inset: 0, backgroundImage: 'linear-gradient(rgba(255,255,255,0.02) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.02) 1px, transparent 1px)', backgroundSize: '60px 60px' }} />
         </div>
 
-        <header style={{position: 'relative', zIndex: 10, padding: '20px 32px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderBottom: '1px solid rgba(255,255,255,0.05)', animation: 'fadeIn 0.5s ease forwards'}}>
-          <div style={{display: 'flex', alignItems: 'center', gap: '12px'}}>
-            <div style={{width: '40px', height: '40px', borderRadius: '10px', background: 'rgba(255,255,255,0.08)', border: '1px solid rgba(255,255,255,0.12)', display: 'flex', alignItems: 'center', justifyContent: 'center'}}>
-              <img src="/logo.png" alt="CBC" style={{width: '28px', height: '28px', objectFit: 'contain'}}/>
+        <header style={{ position: 'relative', zIndex: 10, padding: '20px 32px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderBottom: '1px solid rgba(255,255,255,0.05)', animation: 'fadeIn 0.5s ease forwards' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+            <div style={{ width: '40px', height: '40px', borderRadius: '10px', background: 'rgba(255,255,255,0.08)', border: '1px solid rgba(255,255,255,0.12)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+              <img src="/logo.png" alt="CBC" style={{ width: '28px', height: '28px', objectFit: 'contain' }} />
             </div>
             <div>
-              <p style={{margin: 0, fontSize: '15px', fontWeight: 700, color: '#ffffff', fontFamily: 'Syne, sans-serif'}}>CBC Perú</p>
-              <p style={{margin: 0, fontSize: '12px', color: 'rgba(255,255,255,0.5)', fontFamily: 'DM Sans, sans-serif'}}>Portal Interno</p>
+              <p style={{ margin: 0, fontSize: '15px', fontWeight: 700, color: '#ffffff', fontFamily: 'Syne, sans-serif' }}>CBC Perú</p>
+              <p style={{ margin: 0, fontSize: '12px', color: 'rgba(255,255,255,0.5)', fontFamily: 'DM Sans, sans-serif' }}>Portal Interno</p>
             </div>
           </div>
-          <div style={{display: 'flex', alignItems: 'center', gap: '8px', background: 'rgba(6,182,212,0.1)', border: '1px solid rgba(6,182,212,0.2)', borderRadius: '20px', padding: '6px 14px'}}>
-            <div style={{width: '6px', height: '6px', borderRadius: '50%', background: '#22c55e', boxShadow: '0 0 6px #22c55e'}}/>
-            <span style={{fontSize: '12px', color: 'rgba(255,255,255,0.7)', fontFamily: 'DM Sans, sans-serif'}}>Sistema Activo</span>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', background: 'rgba(6,182,212,0.1)', border: '1px solid rgba(6,182,212,0.2)', borderRadius: '20px', padding: '6px 14px' }}>
+            <div style={{ width: '6px', height: '6px', borderRadius: '50%', background: '#22c55e', boxShadow: '0 0 6px #22c55e' }} />
+            <span style={{ fontSize: '12px', color: 'rgba(255,255,255,0.7)', fontFamily: 'DM Sans, sans-serif' }}>Sistema Activo</span>
           </div>
         </header>
 
-        <div style={{position: 'relative', zIndex: 5, maxWidth: '1200px', margin: '0 auto', padding: '80px 32px 60px', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '60px', alignItems: 'center'}}>
-          <div>
-            <div className="badge" style={{display: 'inline-flex', alignItems: 'center', gap: '8px', background: 'rgba(6,182,212,0.1)', border: '1px solid rgba(6,182,212,0.25)', borderRadius: '20px', padding: '6px 16px', marginBottom: '28px'}}>
-              <span style={{fontSize: '12px', fontWeight: 700, color: '#67e8f9', fontFamily: 'DM Sans, sans-serif', textTransform: 'uppercase', letterSpacing: '1px'}}>🛡️ Uso Exclusivo Interno</span>
-            </div>
-
-            <h1 className="hero-title" style={{fontFamily: 'Syne, sans-serif', fontSize: '72px', fontWeight: 800, color: '#fff', lineHeight: 1.0, margin: '0 0 4px 0'}}>CBC</h1>
-            <h1 className="hero-title shimmer-text" style={{fontFamily: 'Syne, sans-serif', fontSize: '72px', fontWeight: 800, lineHeight: 1.0, margin: '0 0 28px 0'}}>Perú</h1>
-
-            <p className="hero-sub" style={{fontFamily: 'DM Sans, sans-serif', fontSize: '17px', color: 'rgba(255,255,255,0.6)', lineHeight: 1.7, margin: '0 0 40px 0', maxWidth: '420px'}}>
-              Gestiona solicitudes de distribución e inventario en tiempo real para las sedes de Lima y Norte.
-            </p>
-
-            <div className="hero-sub" style={{display: 'flex', gap: '32px', marginBottom: '48px'}}>
-              {[{num: '2', label: 'Regiones'}, {num: '100%', label: 'En la nube'}, {num: '∞', label: 'Pedidos'}].map(s => (
-                <div key={s.label}>
-                  <p style={{margin: 0, fontSize: '24px', fontWeight: 800, color: '#06b6d4', fontFamily: 'Syne, sans-serif'}}>{s.num}</p>
-                  <p style={{margin: 0, fontSize: '11px', color: 'rgba(255,255,255,0.4)', fontFamily: 'DM Sans, sans-serif', textTransform: 'uppercase', letterSpacing: '1px'}}>{s.label}</p>
-                </div>
-              ))}
-            </div>
-
-            <div className="hero-btns" style={{display: 'flex', gap: '16px', flexWrap: 'wrap'}}>
-              <button onClick={() => setModalRegion(true)} className="glow-btn" style={{background: 'linear-gradient(135deg, #06b6d4, #0891b2)', border: 'none', borderRadius: '14px', padding: '16px 32px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '10px', fontFamily: 'Syne, sans-serif', fontSize: '15px', fontWeight: 700, color: '#ffffff'}}>
-                <span>🛒</span> Realizar Pedido <span style={{opacity: 0.7}}>→</span>
-              </button>
-              <button onClick={() => setModalModificar(true)} className="glow-btn card-region" style={{background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.12)', borderRadius: '14px', padding: '16px 32px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '10px', fontFamily: 'Syne, sans-serif', fontSize: '15px', fontWeight: 700, color: '#ffffff'}}>
-                <span>✏️</span> Modificar Pedido <span style={{opacity: 0.7}}>→</span>
-              </button>
+        <div style={{ position: 'relative', zIndex: 5, maxWidth: '900px', margin: '0 auto', padding: '100px 32px 80px', display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center' }}>
+          <div className="hero-title" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '30px', margin: '0 0 24px 0' }}>
+            <h1 style={{ fontFamily: 'Syne, sans-serif', fontSize: '80px', fontWeight: 800, color: '#fff', lineHeight: 1.1, letterSpacing: '-1px', margin: 0, textAlign: 'right' }}>
+              CBC Perú
+              <br />
+              <span className="shimmer-text" style={{ color: '#06b6d4', fontSize: '42px', display: 'block', marginTop: '10px' }}>Venta al personal</span>
+            </h1>
+            <div className="hero-main-logo">
+              <img src="/cbc_pe.png" alt="CBC Perú Logo" className="logo-float" style={{ width: '150px', height: '150px', objectFit: 'contain', filter: 'drop-shadow(0 0 25px rgba(6, 182, 212, 0.4))' }} />
             </div>
           </div>
 
-          <div className="hero-logo" style={{display: 'flex', alignItems: 'center', justifyContent: 'center'}}>
-            <div className="logo-float" style={{position: 'relative', width: '340px', height: '340px'}}>
-              <div className="ring-spin" style={{position: 'absolute', inset: 0, borderRadius: '50%', border: '1px solid transparent', backgroundImage: 'linear-gradient(#0a0f1e, #0a0f1e), linear-gradient(135deg, #06b6d4, transparent, #a855f7)', backgroundOrigin: 'border-box', backgroundClip: 'padding-box, border-box'}}/>
-              <div style={{position: 'absolute', inset: '20px', borderRadius: '50%', border: '1px solid rgba(6,182,212,0.15)'}}/>
-              <div style={{position: 'absolute', inset: '40px', borderRadius: '50%', background: 'rgba(255,255,255,0.95)', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 0 60px rgba(6,182,212,0.2), 0 20px 60px rgba(0,0,0,0.4)'}}>
-                <img src="/logo.png" alt="CBC Logo" style={{width: '65%', objectFit: 'contain'}}/>
-              </div>
-              {[0, 90, 180, 270].map((deg, i) => (
-                <div key={i} style={{position: 'absolute', top: '50%', left: '50%', width: '10px', height: '10px', borderRadius: '50%', background: i % 2 === 0 ? '#06b6d4' : '#a855f7', boxShadow: `0 0 10px ${i % 2 === 0 ? '#06b6d4' : '#a855f7'}`, transform: `rotate(${deg}deg) translateX(165px) translate(-50%, -50%)`}}/>
-              ))}
-            </div>
+
+
+          <div className="hero-btns" style={{ display: 'flex', gap: '20px', justifyContent: 'center', flexWrap: 'wrap' }}>
+            <button onClick={() => setModalRegion(true)} className="glow-btn" style={{ background: '#ffffff', color: '#0f172a', border: 'none', borderRadius: '12px', padding: '18px 36px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '12px', fontFamily: 'Syne, sans-serif', fontSize: '16px', fontWeight: 800, transition: 'all 0.2s', boxShadow: '0 10px 25px rgba(255,255,255,0.1)' }}>
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M12 4v16m8-8H4" /></svg>
+              Nuevo Pedido
+            </button>
+            <button onClick={() => setModalModificar(true)} className="card-region" style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.15)', borderRadius: '12px', padding: '18px 36px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '12px', fontFamily: 'Syne, sans-serif', fontSize: '16px', fontWeight: 800, color: '#ffffff', transition: 'all 0.2s' }}>
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>
+              Modificar Pedido
+            </button>
           </div>
         </div>
 
-        <div style={{position: 'relative', zIndex: 5, maxWidth: '1200px', margin: '0 auto', padding: '0 32px 60px', display: 'flex', gap: '16px', flexWrap: 'wrap'}}>
+        <div style={{ position: 'relative', zIndex: 5, maxWidth: '1200px', margin: '0 auto', padding: '0 32px 60px', display: 'flex', gap: '16px', flexWrap: 'wrap' }}>
           {[
-            {icon: '⚡', title: 'Tiempo Real', desc: 'Stock reajustado automáticamente'},
-            {icon: '🔒', title: 'Seguro', desc: 'Acceso exclusivo para trabajadores'},
-            {icon: '📦', title: 'Multi-producto', desc: 'La Bodeguita, More y Diageo'},
-            {icon: '📧', title: 'Confirmación', desc: 'Correo automático al registrar'},
+            { icon: '⚡', title: 'Tiempo Real', desc: 'Stock reajustado automáticamente' },
+            { icon: '🔒', title: 'Seguro', desc: 'Acceso exclusivo para trabajadores' },
+            { icon: '📦', title: 'Multi-producto', desc: 'La Bodeguita, More y Diageo' },
+            { icon: '📧', title: 'Confirmación', desc: 'Correo automático al registrar' },
           ].map(f => (
-            <div key={f.title} className="card-region" style={{flex: '1', minWidth: '200px', background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.07)', borderRadius: '16px', padding: '20px'}}>
-              <span style={{fontSize: '24px', display: 'block', marginBottom: '10px'}}>{f.icon}</span>
-              <p style={{margin: '0 0 4px 0', fontSize: '14px', fontWeight: 700, color: '#ffffff', fontFamily: 'Syne, sans-serif'}}>{f.title}</p>
-              <p style={{margin: 0, fontSize: '12px', color: 'rgba(255,255,255,0.4)', fontFamily: 'DM Sans, sans-serif'}}>{f.desc}</p>
+            <div key={f.title} className="card-region" style={{ flex: '1', minWidth: '200px', background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.07)', borderRadius: '16px', padding: '20px' }}>
+              <span style={{ fontSize: '24px', display: 'block', marginBottom: '10px' }}>{f.icon}</span>
+              <p style={{ margin: '0 0 4px 0', fontSize: '14px', fontWeight: 700, color: '#ffffff', fontFamily: 'Syne, sans-serif' }}>{f.title}</p>
+              <p style={{ margin: 0, fontSize: '12px', color: 'rgba(255,255,255,0.4)', fontFamily: 'DM Sans, sans-serif' }}>{f.desc}</p>
             </div>
           ))}
         </div>
 
         {modalRegion && (
-          <div onClick={(e) => { if (e.target === e.currentTarget) setModalRegion(false); }} style={{position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.75)', backdropFilter: 'blur(8px)', zIndex: 100, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '20px', animation: 'fadeIn 0.2s ease forwards'}}>
-            <div style={{background: 'linear-gradient(135deg, #0d1b3e, #0a1628)', border: '1px solid rgba(6,182,212,0.25)', borderRadius: '24px', padding: '40px', width: '100%', maxWidth: '440px', boxShadow: '0 0 80px rgba(6,182,212,0.15)'}}>
-              
-              <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '32px'}}>
+          <div onClick={(e) => { if (e.target === e.currentTarget) setModalRegion(false); }} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.75)', backdropFilter: 'blur(8px)', zIndex: 100, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '20px', animation: 'fadeIn 0.2s ease forwards' }}>
+            <div style={{ background: 'linear-gradient(135deg, #0d1b3e, #0a1628)', border: '1px solid rgba(6,182,212,0.25)', borderRadius: '24px', padding: '40px', width: '100%', maxWidth: '440px', boxShadow: '0 0 80px rgba(6,182,212,0.15)' }}>
+
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '32px' }}>
                 <div>
-                  <p style={{margin: 0, fontSize: '11px', fontWeight: 700, color: '#67e8f9', letterSpacing: '2px', textTransform: 'uppercase', fontFamily: 'DM Sans, sans-serif'}}>Realizar Pedido</p>
-                  <h2 style={{margin: '6px 0 0 0', fontSize: '24px', fontWeight: 800, color: '#ffffff', fontFamily: 'Syne, sans-serif'}}>¿Cuál es tu región?</h2>
+                  <p style={{ margin: 0, fontSize: '11px', fontWeight: 700, color: '#67e8f9', letterSpacing: '2px', textTransform: 'uppercase', fontFamily: 'DM Sans, sans-serif' }}>Realizar Pedido</p>
+                  <h2 style={{ margin: '6px 0 0 0', fontSize: '24px', fontWeight: 800, color: '#ffffff', fontFamily: 'Syne, sans-serif' }}>¿Cuál es tu región?</h2>
                 </div>
-                <button onClick={() => setModalRegion(false)} style={{background: 'rgba(255,255,255,0.08)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '50%', width: '36px', height: '36px', color: '#ffffff', cursor: 'pointer', fontSize: '16px', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0}}>✕</button>
+                <button onClick={() => setModalRegion(false)} style={{ background: 'rgba(255,255,255,0.08)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '50%', width: '36px', height: '36px', color: '#ffffff', cursor: 'pointer', fontSize: '16px', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>✕</button>
               </div>
 
-              <div style={{display: 'flex', flexDirection: 'column', gap: '12px'}}>
-                <button onClick={() => { setModalRegion(false); cargarDatos('Lima'); }} className="modal-btn" style={{background: 'linear-gradient(135deg, #06b6d4, #0891b2)', border: 'none', borderRadius: '16px', padding: '20px 24px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '16px', fontFamily: 'Syne, sans-serif', color: '#ffffff', textAlign: 'left', width: '100%'}}>
-                  <span style={{fontSize: '28px', flexShrink: 0}}>📍</span>
-                  <div style={{flex: 1}}>
-                    <p style={{margin: 0, fontSize: '17px', fontWeight: 700}}>Región Lima</p>
-                    <p style={{margin: '2px 0 0 0', fontSize: '12px', opacity: 0.75, fontFamily: 'DM Sans, sans-serif'}}>Callao · Chorrillos · La Molina · San Isidro</p>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                <button onClick={() => { setModalRegion(false); cargarDatos('Lima'); }} className="modal-btn" style={{ background: 'linear-gradient(135deg, #06b6d4, #0891b2)', border: 'none', borderRadius: '16px', padding: '20px 24px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '16px', fontFamily: 'Syne, sans-serif', color: '#ffffff', textAlign: 'left', width: '100%' }}>
+                  <span style={{ fontSize: '28px', flexShrink: 0 }}>📍</span>
+                  <div style={{ flex: 1 }}>
+                    <p style={{ margin: 0, fontSize: '17px', fontWeight: 700 }}>Región Lima</p>
+                    <p style={{ margin: '2px 0 0 0', fontSize: '12px', opacity: 0.75, fontFamily: 'DM Sans, sans-serif' }}>Callao · Chorrillos · La Molina · San Isidro</p>
                   </div>
-                  <span style={{opacity: 0.6, fontSize: '18px'}}>→</span>
+                  <span style={{ opacity: 0.6, fontSize: '18px' }}>→</span>
                 </button>
 
-                <button onClick={() => { setModalRegion(false); cargarDatos('Norte'); }} className="modal-btn" style={{background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.15)', borderRadius: '16px', padding: '20px 24px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '16px', fontFamily: 'Syne, sans-serif', color: '#ffffff', textAlign: 'left', width: '100%'}}>
-                  <span style={{fontSize: '28px', flexShrink: 0}}>📍</span>
-                  <div style={{flex: 1}}>
-                    <p style={{margin: 0, fontSize: '17px', fontWeight: 700}}>Región Norte</p>
-                    <p style={{margin: '2px 0 0 0', fontSize: '12px', opacity: 0.75, fontFamily: 'DM Sans, sans-serif'}}>Trujillo · Chiclayo · Piura y más</p>
+                <button onClick={() => { setModalRegion(false); cargarDatos('Norte'); }} className="modal-btn" style={{ background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.15)', borderRadius: '16px', padding: '20px 24px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '16px', fontFamily: 'Syne, sans-serif', color: '#ffffff', textAlign: 'left', width: '100%' }}>
+                  <span style={{ fontSize: '28px', flexShrink: 0 }}>📍</span>
+                  <div style={{ flex: 1 }}>
+                    <p style={{ margin: 0, fontSize: '17px', fontWeight: 700 }}>Región Norte</p>
+                    <p style={{ margin: '2px 0 0 0', fontSize: '12px', opacity: 0.75, fontFamily: 'DM Sans, sans-serif' }}>Trujillo · Chiclayo · Piura y más</p>
                   </div>
-                  <span style={{opacity: 0.6, fontSize: '18px'}}>→</span>
+                  <span style={{ opacity: 0.6, fontSize: '18px' }}>→</span>
                 </button>
               </div>
             </div>
@@ -468,30 +450,30 @@ export default function Home() {
         )}
 
         {modalModificar && (
-          <div onClick={(e) => { if (e.target === e.currentTarget) setModalModificar(false); }} style={{position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.75)', backdropFilter: 'blur(8px)', zIndex: 100, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '20px', animation: 'fadeIn 0.2s ease forwards'}}>
-            <div style={{background: 'linear-gradient(135deg, #0d1b3e, #0a1628)', border: '1px solid rgba(6,182,212,0.25)', borderRadius: '24px', padding: '40px', width: '100%', maxWidth: '440px', boxShadow: '0 0 80px rgba(6,182,212,0.15)'}}>
-              
-              <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '32px'}}>
+          <div onClick={(e) => { if (e.target === e.currentTarget) setModalModificar(false); }} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.75)', backdropFilter: 'blur(8px)', zIndex: 100, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '20px', animation: 'fadeIn 0.2s ease forwards' }}>
+            <div style={{ background: 'linear-gradient(135deg, #0d1b3e, #0a1628)', border: '1px solid rgba(6,182,212,0.25)', borderRadius: '24px', padding: '40px', width: '100%', maxWidth: '440px', boxShadow: '0 0 80px rgba(6,182,212,0.15)' }}>
+
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '32px' }}>
                 <div>
-                  <p style={{margin: 0, fontSize: '11px', fontWeight: 700, color: '#a855f7', letterSpacing: '2px', textTransform: 'uppercase', fontFamily: 'DM Sans, sans-serif'}}>Modificar Pedido</p>
-                  <h2 style={{margin: '6px 0 0 0', fontSize: '24px', fontWeight: 800, color: '#ffffff', fontFamily: 'Syne, sans-serif'}}>Buscar Pedido</h2>
+                  <p style={{ margin: 0, fontSize: '11px', fontWeight: 700, color: '#a855f7', letterSpacing: '2px', textTransform: 'uppercase', fontFamily: 'DM Sans, sans-serif' }}>Modificar Pedido</p>
+                  <h2 style={{ margin: '6px 0 0 0', fontSize: '24px', fontWeight: 800, color: '#ffffff', fontFamily: 'Syne, sans-serif' }}>Buscar Pedido</h2>
                 </div>
-                <button onClick={() => setModalModificar(false)} style={{background: 'rgba(255,255,255,0.08)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '50%', width: '36px', height: '36px', color: '#ffffff', cursor: 'pointer', fontSize: '16px', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0}}>✕</button>
+                <button onClick={() => setModalModificar(false)} style={{ background: 'rgba(255,255,255,0.08)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '50%', width: '36px', height: '36px', color: '#ffffff', cursor: 'pointer', fontSize: '16px', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>✕</button>
               </div>
 
-              <div style={{display: 'flex', flexDirection: 'column', gap: '20px'}}>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
                 <div>
-                  <label style={{display: 'block', color: 'rgba(255,255,255,0.7)', fontSize: '13px', marginBottom: '8px', fontFamily: 'DM Sans, sans-serif'}}>ID del Pedido</label>
-                  <input 
-                    type="text" 
-                    value={idPedidoModificar} 
+                  <label style={{ display: 'block', color: 'rgba(255,255,255,0.7)', fontSize: '13px', marginBottom: '8px', fontFamily: 'DM Sans, sans-serif' }}>ID del Pedido</label>
+                  <input
+                    type="text"
+                    value={idPedidoModificar}
                     onChange={(e) => setIdPedidoModificar(e.target.value)}
-                    placeholder="Ej: PED-123456" 
-                    style={{width: '100%', padding: '14px 16px', borderRadius: '12px', background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.15)', color: '#fff', fontSize: '15px', fontFamily: 'DM Sans, sans-serif', outline: 'none', boxSizing: 'border-box'}}
+                    placeholder="Ej: PED-123456"
+                    style={{ width: '100%', padding: '14px 16px', borderRadius: '12px', background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.15)', color: '#fff', fontSize: '15px', fontFamily: 'DM Sans, sans-serif', outline: 'none', boxSizing: 'border-box' }}
                   />
                 </div>
 
-                <button onClick={buscarPedidoParaModificar} disabled={buscandoPedido} className="modal-btn" style={{background: 'linear-gradient(135deg, #a855f7, #9333ea)', border: 'none', borderRadius: '14px', padding: '16px', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '10px', fontFamily: 'Syne, sans-serif', fontSize: '15px', fontWeight: 700, color: '#ffffff', width: '100%'}}>
+                <button onClick={buscarPedidoParaModificar} disabled={buscandoPedido} className="modal-btn" style={{ background: 'linear-gradient(135deg, #a855f7, #9333ea)', border: 'none', borderRadius: '14px', padding: '16px', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '10px', fontFamily: 'Syne, sans-serif', fontSize: '15px', fontWeight: 700, color: '#ffffff', width: '100%' }}>
                   {buscandoPedido ? 'Buscando...' : 'Buscar Pedido 🔍'}
                 </button>
               </div>
@@ -518,7 +500,7 @@ export default function Home() {
   // ==========================================
   if (pantalla === 'modificar') {
     return (
-      <main className="min-h-screen antialiased py-10 px-4" style={{background: 'linear-gradient(135deg, #0a0f1e 0%, #0d1b3e 50%, #0a1628 100%)', color: '#fff'}}>
+      <main className="min-h-screen antialiased py-10 px-4" style={{ background: 'linear-gradient(135deg, #0a0f1e 0%, #0d1b3e 50%, #0a1628 100%)', color: '#fff' }}>
         <style>{`
           @import url('https://fonts.googleapis.com/css2?family=Syne:wght@700;800&family=DM+Sans:wght@400;500;700&display=swap');
           body { -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale; }
@@ -534,63 +516,63 @@ export default function Home() {
           .quantity-btn:hover { background: rgba(255,255,255,0.1); border-color: #a855f7; }
           .quantity-btn:disabled { opacity: 0.3; cursor: not-allowed; }
         `}</style>
-        
+
         <div className="max-w-4xl mx-auto">
           <header className="mb-10 flex items-center justify-between gap-6">
-            <button onClick={() => { setPantalla('catalogo'); setIdPedidoModificar(''); }} style={{background: 'none', border: 'none', color: 'rgba(255,255,255,0.5)', fontFamily: 'DM Sans, sans-serif', fontSize: '14px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '8px'}} className="hover:text-white transition-colors">
+            <button onClick={() => { setPantalla('catalogo'); setIdPedidoModificar(''); }} style={{ background: 'none', border: 'none', color: 'rgba(255,255,255,0.5)', fontFamily: 'DM Sans, sans-serif', fontSize: '14px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '8px' }} className="hover:text-white transition-colors">
               ← Volver al inicio
             </button>
             <div className="text-right">
-                <h1 style={{fontFamily: 'Syne, sans-serif', fontSize: '32px', fontWeight: 800, margin: '0 0 4px 0'}}>Modificar Pedido Existente</h1>
-                <p style={{fontFamily: 'DM Sans, sans-serif', color: 'rgba(255,255,255,0.5)', margin: 0}}>Actualiza lugar y cantidades para <span style={{color: '#a855f7', fontWeight: 700, fontFamily: 'monospace'}}>{idPedidoModificar}</span></p>
-                <p style={{fontFamily: 'DM Sans, sans-serif', color: 'rgba(255,255,255,0.5)', fontSize: '13px', margin: 0}}>Cliente: {itemsPedidoOriginal[0]?.nombre_cliente}</p>
+              <h1 style={{ fontFamily: 'Syne, sans-serif', fontSize: '32px', fontWeight: 800, margin: '0 0 4px 0' }}>Modificar Pedido Existente</h1>
+              <p style={{ fontFamily: 'DM Sans, sans-serif', color: 'rgba(255,255,255,0.5)', margin: 0 }}>Actualiza lugar y cantidades para <span style={{ color: '#a855f7', fontWeight: 700, fontFamily: 'monospace' }}>{idPedidoModificar}</span></p>
+              <p style={{ fontFamily: 'DM Sans, sans-serif', color: 'rgba(255,255,255,0.5)', fontSize: '13px', margin: 0 }}>Cliente: {itemsPedidoOriginal[0]?.nombre_cliente}</p>
             </div>
           </header>
 
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
             <div className="dark-card flex flex-col h-full">
-              <h2 style={{fontFamily: 'Syne, sans-serif', fontSize: '18px', fontWeight: 700, marginBottom: '24px', color: '#fff', borderBottom: '1px solid rgba(255,255,255,0.08)', paddingBottom: '10px'}}>Detalle del Pedido y Lugar</h2>
-              
+              <h2 style={{ fontFamily: 'Syne, sans-serif', fontSize: '18px', fontWeight: 700, marginBottom: '24px', color: '#fff', borderBottom: '1px solid rgba(255,255,255,0.08)', paddingBottom: '10px' }}>Detalle del Pedido y Lugar</h2>
+
               <div className="mb-8">
                 <label className="dark-label">Lugar de Entrega (Editable)</label>
-                <select value={lugarModificado} onChange={(e) => setLugarModificado(e.target.value)} className="dark-input" style={{appearance: 'none'}}>
-                  <option value="Sala de ventas Norte (Callao)" style={{color: '#000'}}>Sala de ventas Norte (Callao)</option>
-                  <option value="Sala de ventas Sur (Chorrillos)" style={{color: '#000'}}>Sala de ventas Sur (Chorrillos)</option>
-                  <option value="Sala de ventas Este (La Molina)" style={{color: '#000'}}>Sala de ventas Este (La Molina)</option>
-                  <option value="Cromo (San isidro)" style={{color: '#000'}}>Cromo (San isidro)</option>
+                <select value={lugarModificado} onChange={(e) => setLugarModificado(e.target.value)} className="dark-input" style={{ appearance: 'none' }}>
+                  <option value="Sala de ventas Norte (Callao)" style={{ color: '#000' }}>Sala de ventas Norte (Callao)</option>
+                  <option value="Sala de ventas Sur (Chorrillos)" style={{ color: '#000' }}>Sala de ventas Sur (Chorrillos)</option>
+                  <option value="Sala de ventas Este (La Molina)" style={{ color: '#000' }}>Sala de ventas Este (La Molina)</option>
+                  <option value="Cromo (San isidro)" style={{ color: '#000' }}>Cromo (San isidro)</option>
                 </select>
               </div>
 
-              <div className="flex-1 overflow-y-auto pr-2" style={{maxHeight: '400px'}}>
+              <div className="flex-1 overflow-y-auto pr-2" style={{ maxHeight: '400px' }}>
                 <div className="flex flex-col gap-6">
                   {itemsPedidoOriginal.map(item => {
                     const cantidadModificada = cantidadesModificadasMap[item.material_id] || item.cantidad;
                     // Límite visual: Lo que se pidió + lo que está libre ahora mismo en BD
                     const maximoPermitido = Number(item.stock_actual) + Number(item.cantidad);
-                    
+
                     return (
-                        <div key={item.material_id} style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '16px', borderBottom: '1px solid rgba(255,255,255,0.05)', paddingBottom: '16px'}}>
-                            <div style={{flex: 1}}>
-                                <p style={{fontFamily: 'DM Sans, sans-serif', fontSize: '14px', fontWeight: 700, color: '#fff', margin: '0 0 2px 0'}}>{item.descripcion}</p>
-                                <div style={{display: 'flex', alignItems: 'center', gap: '8px'}}>
-                                    <span style={{fontSize: '11px', fontFamily: 'monospace', color: 'rgba(255,255,255,0.4)', background: 'rgba(255,255,255,0.05)', padding: '2px 6px', borderRadius: '4px'}}>ID: {item.material_id}</span>
-                                    <span style={{fontSize: '13px', fontWeight: 700, color: '#06b6d4'}}>S/ {Number(item.precio_unitario).toFixed(2)} und</span>
-                                </div>
-                            </div>
-                            
-                            <div style={{display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '6px'}}>
-                              <div style={{display: 'flex', alignItems: 'center', gap: '10px', background: 'rgba(255,255,255,0.03)', borderRadius: '12px', border: '1px solid rgba(255,255,255,0.1)', padding: '4px'}}>
-                                  <button onClick={() => actualizarCantidadPedidoExistente(item.material_id, -1)} className="quantity-btn" disabled={cantidadModificada <= 1}>-</button>
-                                  <span style={{width: '40px', textAlign: 'center', fontSize: '18px', fontWeight: 800, color: '#fff', fontFamily: 'Syne, sans-serif'}}>{cantidadModificada}</span>
-                                  {/* El botón "+" se bloquea si se llega al límite */}
-                                  <button onClick={() => actualizarCantidadPedidoExistente(item.material_id, 1)} className="quantity-btn" disabled={cantidadModificada >= maximoPermitido}>+</button>
-                              </div>
-                              {/* Texto del Límite de Stock */}
-                              <span style={{fontSize: '11px', fontWeight: 600, color: cantidadModificada >= maximoPermitido ? '#fca5a5' : 'rgba(255,255,255,0.4)', fontFamily: 'DM Sans, sans-serif'}}>
-                                Límite total: {maximoPermitido}
-                              </span>
-                            </div>
+                      <div key={item.material_id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '16px', borderBottom: '1px solid rgba(255,255,255,0.05)', paddingBottom: '16px' }}>
+                        <div style={{ flex: 1 }}>
+                          <p style={{ fontFamily: 'DM Sans, sans-serif', fontSize: '14px', fontWeight: 700, color: '#fff', margin: '0 0 2px 0' }}>{item.descripcion}</p>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                            <span style={{ fontSize: '11px', fontFamily: 'monospace', color: 'rgba(255,255,255,0.4)', background: 'rgba(255,255,255,0.05)', padding: '2px 6px', borderRadius: '4px' }}>ID: {item.material_id}</span>
+                            <span style={{ fontSize: '13px', fontWeight: 700, color: '#06b6d4' }}>S/ {Number(item.precio_unitario).toFixed(2)} und</span>
+                          </div>
                         </div>
+
+                        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '6px' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '10px', background: 'rgba(255,255,255,0.03)', borderRadius: '12px', border: '1px solid rgba(255,255,255,0.1)', padding: '4px' }}>
+                            <button onClick={() => actualizarCantidadPedidoExistente(item.material_id, -1)} className="quantity-btn" disabled={cantidadModificada <= 1}>-</button>
+                            <span style={{ width: '40px', textAlign: 'center', fontSize: '18px', fontWeight: 800, color: '#fff', fontFamily: 'Syne, sans-serif' }}>{cantidadModificada}</span>
+                            {/* El botón "+" se bloquea si se llega al límite */}
+                            <button onClick={() => actualizarCantidadPedidoExistente(item.material_id, 1)} className="quantity-btn" disabled={cantidadModificada >= maximoPermitido}>+</button>
+                          </div>
+                          {/* Texto del Límite de Stock */}
+                          <span style={{ fontSize: '11px', fontWeight: 600, color: cantidadModificada >= maximoPermitido ? '#fca5a5' : 'rgba(255,255,255,0.4)', fontFamily: 'DM Sans, sans-serif' }}>
+                            Límite total: {maximoPermitido}
+                          </span>
+                        </div>
+                      </div>
                     );
                   })}
                 </div>
@@ -598,32 +580,32 @@ export default function Home() {
             </div>
 
             <div className="dark-card flex flex-col gap-5 relative h-full">
-              <h2 style={{fontFamily: 'Syne, sans-serif', fontSize: '18px', fontWeight: 700, color: '#fff', borderBottom: '1px solid rgba(255,255,255,0.08)', paddingBottom: '10px', marginBottom: '10px'}}>Estado y Comprobante</h2>
-              
+              <h2 style={{ fontFamily: 'Syne, sans-serif', fontSize: '18px', fontWeight: 700, color: '#fff', borderBottom: '1px solid rgba(255,255,255,0.08)', paddingBottom: '10px', marginBottom: '10px' }}>Estado y Comprobante</h2>
+
               <div>
                 <label className="dark-label">Estado del Pedido (No Modificable)</label>
-                <input 
-                  type="text" 
-                  value={itemsPedidoOriginal[0]?.estado || ''} 
-                  readOnly 
-                  className="dark-input" 
-                  style={{background: 'rgba(255,255,255,0.02)', color: 'rgba(255,255,255,0.4)', cursor: 'not-allowed', fontWeight: 700}}
+                <input
+                  type="text"
+                  value={itemsPedidoOriginal[0]?.estado || ''}
+                  readOnly
+                  className="dark-input"
+                  style={{ background: 'rgba(255,255,255,0.02)', color: 'rgba(255,255,255,0.4)', cursor: 'not-allowed', fontWeight: 700 }}
                 />
               </div>
 
               <div className="mt-2 flex-1 flex flex-col">
                 <label className="dark-label mb-2">Comprobante de Pago Actual / Nuevo</label>
-                
+
                 {itemsPedidoOriginal[0]?.comprobante_url && itemsPedidoOriginal[0].comprobante_url !== 'Sin comprobante' && !comprobanteModificado && (
                   <div className="mb-4">
-                    <p style={{fontSize: '12px', color: 'rgba(255,255,255,0.5)', marginBottom: '5px'}}>Comprobante actual:</p>
-                    <img src={itemsPedidoOriginal[0].comprobante_url} alt="Comprobante Actual" style={{maxWidth: '100%', maxHeight: '120px', borderRadius: '12px', border: '1px solid rgba(255,255,255,0.1)'}}/>
+                    <p style={{ fontSize: '12px', color: 'rgba(255,255,255,0.5)', marginBottom: '5px' }}>Comprobante actual:</p>
+                    <img src={itemsPedidoOriginal[0].comprobante_url} alt="Comprobante Actual" style={{ maxWidth: '100%', maxHeight: '120px', borderRadius: '12px', border: '1px solid rgba(255,255,255,0.1)' }} />
                   </div>
                 )}
 
                 <label className={`border-2 border-dashed rounded-xl p-6 text-center cursor-pointer block flex-1 flex flex-col justify-center items-center transition-all hover:bg-white/5 ${comprobanteModificado ? 'border-green-400 bg-green-950/20' : 'border-slate-500'}`}>
                   {comprobanteModificado ? (<><span className="text-3xl mb-1 block">✅</span><p className="text-sm text-green-300 font-bold truncate px-4">{comprobanteModificado.name}</p></>) : (<><span className="text-2xl mb-1 block">📸</span><p className="text-sm text-slate-300 font-bold">Subir Yape / Transferencia Nuevo (Opcional)</p></>)}
-                  <input type="file" accept="image/*" className="hidden" onChange={(e) => { if (e.target.files && e.target.files[0]) setComprobanteModificado(e.target.files[0]); }}/>
+                  <input type="file" accept="image/*" className="hidden" onChange={(e) => { if (e.target.files && e.target.files[0]) setComprobanteModificado(e.target.files[0]); }} />
                 </label>
               </div>
 
@@ -674,11 +656,11 @@ export default function Home() {
 
             <div className="bg-white p-6 rounded-3xl shadow-sm border border-slate-100 flex flex-col gap-5 relative">
               <h2 className="font-bold text-lg text-slate-800 border-b pb-2 mb-2">Datos del Vendedor / Cliente</h2>
-              
+
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div className="md:col-span-2 relative">
                   <label className="block text-xs font-bold text-slate-500 mb-1 uppercase tracking-wider">Nombre Completo (Obligatorio)</label>
-                  <input type="text" value={busquedaVendedor} onFocus={() => setMostrarSugerencias(true)} onChange={(e) => { setBusquedaVendedor(e.target.value); setMostrarSugerencias(true); setDatosVenta(prev => ({ ...prev, nombre: '', codigoEmpleado: '' })); }} placeholder="Escribe tu nombre para buscar..." className="w-full bg-slate-50 border border-slate-200 rounded-lg px-4 py-3 focus:outline-none focus:ring-2 focus:ring-blue-500 font-medium text-slate-800"/>
+                  <input type="text" value={busquedaVendedor} onFocus={() => setMostrarSugerencias(true)} onChange={(e) => { setBusquedaVendedor(e.target.value); setMostrarSugerencias(true); setDatosVenta(prev => ({ ...prev, nombre: '', codigoEmpleado: '' })); }} placeholder="Escribe tu nombre para buscar..." className="w-full bg-slate-50 border border-slate-200 rounded-lg px-4 py-3 focus:outline-none focus:ring-2 focus:ring-blue-500 font-medium text-slate-800" />
                   {datosVenta.nombre && <span className="absolute right-3 top-9 text-green-500 font-bold text-sm bg-white px-2 py-1 rounded">✓ Confirmado</span>}
                   {mostrarSugerencias && busquedaVendedor.length > 0 && !datosVenta.nombre && (
                     <ul className="absolute z-50 w-full bg-white border border-slate-200 mt-1 rounded-lg shadow-xl max-h-48 overflow-y-auto">
@@ -708,12 +690,12 @@ export default function Home() {
 
                 <div>
                   <label className="block text-xs font-bold text-slate-500 mb-1 uppercase tracking-wider">Código Empleado</label>
-                  <input type="text" value={datosVenta.codigoEmpleado} readOnly placeholder="Se llena automáticamente" className="w-full bg-slate-100 border border-slate-200 rounded-lg px-4 py-3 font-bold text-blue-600 cursor-not-allowed"/>
+                  <input type="text" value={datosVenta.codigoEmpleado} readOnly placeholder="Se llena automáticamente" className="w-full bg-slate-100 border border-slate-200 rounded-lg px-4 py-3 font-bold text-blue-600 cursor-not-allowed" />
                 </div>
 
                 <div className="md:col-span-2">
                   <label className="block text-xs font-bold text-slate-500 mb-1 uppercase tracking-wider">Correo Electrónico</label>
-                  <input type="email" name="correo" value={datosVenta.correo} onChange={manejarCambioInput} placeholder="Ej: usuario@empresa.com" className="w-full bg-slate-50 border border-slate-200 rounded-lg px-4 py-3 focus:outline-none focus:ring-2 focus:ring-blue-500 font-medium text-slate-800"/>
+                  <input type="email" name="correo" value={datosVenta.correo} onChange={manejarCambioInput} placeholder="Ej: usuario@empresa.com" className="w-full bg-slate-50 border border-slate-200 rounded-lg px-4 py-3 focus:outline-none focus:ring-2 focus:ring-blue-500 font-medium text-slate-800" />
                 </div>
               </div>
 
@@ -721,7 +703,7 @@ export default function Home() {
                 <label className="block text-xs font-bold text-slate-500 mb-2 uppercase tracking-wider">Comprobante de Pago</label>
                 <label className={`border-2 border-dashed rounded-xl p-4 text-center hover:bg-slate-50 cursor-pointer block ${comprobante ? 'border-green-400 bg-green-50/30' : 'border-slate-300'}`}>
                   {comprobante ? (<><span className="text-3xl mb-1 block">✅</span><p className="text-sm text-green-700 font-bold truncate px-4">{comprobante.name}</p></>) : (<><span className="text-2xl mb-1 block">📸</span><p className="text-sm text-slate-600 font-bold">Subir Yape / Transferencia</p></>)}
-                  <input type="file" accept="image/*" className="hidden" onChange={(e) => { if (e.target.files && e.target.files[0]) setComprobante(e.target.files[0]); }}/>
+                  <input type="file" accept="image/*" className="hidden" onChange={(e) => { if (e.target.files && e.target.files[0]) setComprobante(e.target.files[0]); }} />
                 </label>
               </div>
 
@@ -756,34 +738,34 @@ export default function Home() {
         </div>
       </header>
 
-      <div style={{background: '#ffffff', borderBottom: '1px solid #e2e8f0', padding: '14px 0', position: 'sticky', top: '80px', zIndex: 30, boxShadow: '0 2px 8px rgba(0,0,0,0.05)'}}>
-        <div className="max-w-7xl mx-auto px-4" style={{display: 'flex', gap: '12px', alignItems: 'center', flexWrap: 'wrap'}}>
-          
-          <div style={{display: 'flex', gap: '8px', flexWrap: 'wrap'}}>
+      <div style={{ background: '#ffffff', borderBottom: '1px solid #e2e8f0', padding: '14px 0', position: 'sticky', top: '80px', zIndex: 30, boxShadow: '0 2px 8px rgba(0,0,0,0.05)' }}>
+        <div className="max-w-7xl mx-auto px-4" style={{ display: 'flex', gap: '12px', alignItems: 'center', flexWrap: 'wrap' }}>
+
+          <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
             {[
-              {key: 'Todos', label: '🏪 Todos'},
-              {key: 'La Bodeguita', label: '🏪 La Bodeguita'},
-              {key: 'More', label: '🍬 More'},
-              {key: 'DIAGEO', label: '🥃 Diageo'},
+              { key: 'Todos', label: '🏪 Todos' },
+              { key: 'La Bodeguita', label: '🏪 La Bodeguita' },
+              { key: 'More', label: '🍬 More' },
+              { key: 'DIAGEO', label: '🥃 Diageo' },
             ].map(cat => (
-              <button key={cat.key} onClick={() => setCategoriaFiltro(cat.key)} style={{padding: '8px 16px', borderRadius: '20px', border: 'none', cursor: 'pointer', fontSize: '13px', fontWeight: 700, transition: 'all 0.2s', background: categoriaFiltro === cat.key ? '#0f172a' : '#f1f5f9', color: categoriaFiltro === cat.key ? '#ffffff' : '#64748b', boxShadow: categoriaFiltro === cat.key ? '0 2px 8px rgba(0,0,0,0.15)' : 'none'}}>
+              <button key={cat.key} onClick={() => setCategoriaFiltro(cat.key)} style={{ padding: '8px 16px', borderRadius: '20px', border: 'none', cursor: 'pointer', fontSize: '13px', fontWeight: 700, transition: 'all 0.2s', background: categoriaFiltro === cat.key ? '#0f172a' : '#f1f5f9', color: categoriaFiltro === cat.key ? '#ffffff' : '#64748b', boxShadow: categoriaFiltro === cat.key ? '0 2px 8px rgba(0,0,0,0.15)' : 'none' }}>
                 {cat.label}
               </button>
             ))}
           </div>
 
-          <div style={{flex: 1, minWidth: '220px', position: 'relative'}}>
-            <span style={{position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)', fontSize: '15px', pointerEvents: 'none'}}>🔍</span>
-            <input type="text" value={busquedaProducto} onChange={e => setBusquedaProducto(e.target.value)} placeholder="Buscar por nombre o código de producto..." style={{width: '100%', padding: '10px 40px 10px 38px', borderRadius: '10px', border: '1px solid #e2e8f0', fontSize: '14px', outline: 'none', background: '#f8fafc', boxSizing: 'border-box', fontFamily: 'inherit'}}/>
+          <div style={{ flex: 1, minWidth: '220px', position: 'relative' }}>
+            <span style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)', fontSize: '15px', pointerEvents: 'none' }}>🔍</span>
+            <input type="text" value={busquedaProducto} onChange={e => setBusquedaProducto(e.target.value)} placeholder="Buscar por nombre o código de producto..." style={{ width: '100%', padding: '10px 40px 10px 38px', borderRadius: '10px', border: '1px solid #e2e8f0', fontSize: '14px', outline: 'none', background: '#f8fafc', boxSizing: 'border-box', fontFamily: 'inherit' }} />
             {busquedaProducto && (
-              <button onClick={() => setBusquedaProducto('')} style={{position: 'absolute', right: '12px', top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', cursor: 'pointer', color: '#94a3b8', fontSize: '16px', padding: 0}}>✕</button>
+              <button onClick={() => setBusquedaProducto('')} style={{ position: 'absolute', right: '12px', top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', cursor: 'pointer', color: '#94a3b8', fontSize: '16px', padding: 0 }}>✕</button>
             )}
           </div>
         </div>
 
         {busquedaProducto && (
-          <div className="max-w-7xl mx-auto px-4" style={{marginTop: '8px'}}>
-            <p style={{fontSize: '12px', color: '#64748b', margin: 0}}>
+          <div className="max-w-7xl mx-auto px-4" style={{ marginTop: '8px' }}>
+            <p style={{ fontSize: '12px', color: '#64748b', margin: 0 }}>
               {productosFiltrados.length === 0 ? '❌ No se encontraron productos' : `✅ ${productosFiltrados.length} producto${productosFiltrados.length !== 1 ? 's' : ''} encontrado${productosFiltrados.length !== 1 ? 's' : ''}`}
             </p>
           </div>
@@ -795,7 +777,7 @@ export default function Home() {
           <div className="mb-12">
             <h2 className="text-2xl font-black text-slate-800 mb-6 flex items-center gap-2"><span className="bg-orange-100 text-orange-600 p-2 rounded-lg text-sm">🏪</span> La Bodeguita</h2>
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-              {productosBodeguita.map((prod) => <TarjetaProducto key={prod.material_id} producto={prod} carrito={carrito} onActualizar={actualizarCantidad}/>)}
+              {productosBodeguita.map((prod) => <TarjetaProducto key={prod.material_id} producto={prod} carrito={carrito} onActualizar={actualizarCantidad} />)}
             </div>
           </div>
         )}
@@ -803,7 +785,7 @@ export default function Home() {
           <div className="mb-12">
             <h2 className="text-2xl font-black text-slate-800 mb-6 flex items-center gap-2"><span className="bg-purple-100 text-purple-600 p-2 rounded-lg text-sm">🍬</span> Gomitas More</h2>
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-              {productosMore.map((prod) => <TarjetaProducto key={prod.material_id} producto={prod} carrito={carrito} onActualizar={actualizarCantidad}/>)}
+              {productosMore.map((prod) => <TarjetaProducto key={prod.material_id} producto={prod} carrito={carrito} onActualizar={actualizarCantidad} />)}
             </div>
           </div>
         )}
@@ -811,7 +793,7 @@ export default function Home() {
           <div className="mb-12">
             <h2 className="text-2xl font-black text-slate-800 mb-6 flex items-center gap-2"><span className="bg-amber-100 text-amber-600 p-2 rounded-lg text-sm">🥃</span> Licores Diageo</h2>
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-              {productosDiageo.map((prod) => <TarjetaProducto key={prod.material_id} producto={prod} carrito={carrito} onActualizar={actualizarCantidad}/>)}
+              {productosDiageo.map((prod) => <TarjetaProducto key={prod.material_id} producto={prod} carrito={carrito} onActualizar={actualizarCantidad} />)}
             </div>
           </div>
         )}
