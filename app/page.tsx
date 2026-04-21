@@ -109,6 +109,19 @@ export default function Home() {
       alert("⚠️ Error: Debes seleccionar un Lugar de la lista.");
       return;
     }
+    if (!datosVenta.correo) {
+      alert("⚠️ Error: Debes ingresar tu correo electrónico.");
+      return;
+    }
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(datosVenta.correo)) {
+      alert("⚠️ Error: El formato del correo electrónico no es válido.");
+      return;
+    }
+    if (!comprobante) {
+      alert("⚠️ Error: Debes subir el comprobante de pago (Yape/Transferencia).");
+      return;
+    }
 
     setGuardando(true);
     const ordenBaseId = `PED-${Math.floor(Math.random() * 1000000)}`;
@@ -694,13 +707,13 @@ export default function Home() {
                 </div>
 
                 <div className="md:col-span-2">
-                  <label className="block text-xs font-bold text-slate-500 mb-1 uppercase tracking-wider">Correo Electrónico</label>
+                  <label className="block text-xs font-bold text-slate-500 mb-1 uppercase tracking-wider">Correo Electrónico (Obligatorio)</label>
                   <input type="email" name="correo" value={datosVenta.correo} onChange={manejarCambioInput} placeholder="Ej: usuario@empresa.com" className="w-full bg-slate-50 border border-slate-200 rounded-lg px-4 py-3 focus:outline-none focus:ring-2 focus:ring-blue-500 font-medium text-slate-800" />
                 </div>
               </div>
 
               <div className="mt-2">
-                <label className="block text-xs font-bold text-slate-500 mb-2 uppercase tracking-wider">Comprobante de Pago</label>
+                <label className="block text-xs font-bold text-slate-500 mb-2 uppercase tracking-wider">Comprobante de Pago (Obligatorio)</label>
                 <label className={`border-2 border-dashed rounded-xl p-4 text-center hover:bg-slate-50 cursor-pointer block ${comprobante ? 'border-green-400 bg-green-50/30' : 'border-slate-300'}`}>
                   {comprobante ? (<><span className="text-3xl mb-1 block">✅</span><p className="text-sm text-green-700 font-bold truncate px-4">{comprobante.name}</p></>) : (<><span className="text-2xl mb-1 block">📸</span><p className="text-sm text-slate-600 font-bold">Subir Yape / Transferencia</p></>)}
                   <input type="file" accept="image/*" className="hidden" onChange={(e) => { if (e.target.files && e.target.files[0]) setComprobante(e.target.files[0]); }} />
