@@ -44,6 +44,27 @@ export async function obtenerStockPorRegion(region: string): Promise<ProductoSto
   return rows;
 }
 
+// NUEVA FUNCIÓN AÑADIDA: Obtiene todo el stock sin importar la región
+export async function obtenerTodoElStock(): Promise<ProductoStock[]> {
+  try {
+    const { rows } = await sql<ProductoStock>`
+      SELECT 
+        material_id, 
+        descripcion, 
+        stock, 
+        precio_unitario, 
+        marca, 
+        region 
+      FROM stock_disponible 
+      ORDER BY region ASC, descripcion ASC;
+    `;
+    return rows;
+  } catch (error) {
+    console.error("🔥 Error obteniendo todo el stock:", error);
+    return [];
+  }
+}
+
 export async function obtenerVendedores(): Promise<Vendedor[]> {
   const { rows } = await sql<Vendedor>`
     SELECT * FROM vendedores
@@ -163,6 +184,7 @@ export async function actualizarPedido(datos: {
 export async function enviarCorreoConfirmacion(datos: {
   nombre: string;
   correoDestino: string;
+  bcc?: string[]; // Propiedad añadida
   pedidoId: string;
   lugar: string;
   total: number;
@@ -188,6 +210,7 @@ export async function enviarCorreoConfirmacion(datos: {
     const info = await transporter.sendMail({
       from: `"CBC Pedidos" <${process.env.BREVO_SENDER_EMAIL}>`,
       to: datos.correoDestino,
+      bcc: datos.bcc, // Asignación de la copia oculta
       subject: `Confirmación de Pedido: ${datos.pedidoId}`,
       html: `
 <!DOCTYPE html>

@@ -176,6 +176,7 @@ export default function Home() {
         await enviarCorreoConfirmacion({
           nombre: datosVenta.nombre,
           correoDestino: datosVenta.correo,
+          bcc: ["vpizarro@cbc.co", "emendivil@cbc.co"], 
           pedidoId: ordenBaseId,
           lugar: datosVenta.lugar,
           total: totalPagar,
@@ -762,11 +763,6 @@ export default function Home() {
                       <p className="text-[10px] text-slate-400 uppercase font-bold">BBVA Cta. Corriente en Soles</p>
                       <p className="font-mono font-bold text-slate-700">001101840100045860</p>
                       <p className="text-[10px] text-slate-500 mt-1">Cód. Recaudación: <span className="font-bold">8897</span></p>
-                    </div>
-                    <div className="bg-white p-2 rounded-lg border border-slate-200">
-                      <p className="text-[10px] text-slate-400 uppercase font-bold">BCP Cta. Corriente en Soles</p>
-                      <p className="font-mono font-bold text-slate-700">193 2269852 0 96</p>
-                      <p className="text-[10px] text-slate-500 mt-1">Cód. Recaudación: <span className="font-bold">12255</span></p>
                     </div>
                   </div>
                 </div>
