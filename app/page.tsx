@@ -38,6 +38,7 @@ export default function Home() {
 
   const [busquedaProducto, setBusquedaProducto] = useState('');
   const [categoriaFiltro, setCategoriaFiltro] = useState('Todos');
+  const [marcaFiltro, setMarcaFiltro] = useState('Todas');
 
   const [idPedidoModificar, setIdPedidoModificar] = useState('');
   const [buscandoPedido, setBuscandoPedido] = useState(false);
@@ -57,6 +58,7 @@ export default function Home() {
     setBusquedaVendedor('');
     setBusquedaProducto('');
     setCategoriaFiltro('Todos');
+    setMarcaFiltro('Todas');
 
     try {
       const [datosStock, datosVendedores] = await Promise.all([
@@ -321,14 +323,48 @@ export default function Home() {
 
   const totalPagar = carrito.reduce((suma, item) => suma + (item.cantidad * item.precio_unitario), 0);
 
-  const productosFiltrados = stockReal.filter(p => {
-    const coincideBusqueda = p.descripcion.toLowerCase().includes(busquedaProducto.toLowerCase()) || p.material_id.toLowerCase().includes(busquedaProducto.toLowerCase());
-    const coincideCategoria = categoriaFiltro === 'Todos' || p.grupo === categoriaFiltro;
-    return coincideBusqueda && coincideCategoria;
+  const merchCodes = ['BA013362', 'BA001666', 'BA001667', 'BA016514', 'BA001554', 'BA024155', 'AA900980', 'BA001553', 'BA024154', 'BA016513', 'BA006745', 'BA014478', 'BA014477', 'BA015701', 'BA007718'];
+  const bebidasBrands = ['Concordia', 'Cubata', 'Evervess', 'Frutaris', 'Gatorade', 'H2OH', 'Lipton', 'Mountain', 'Pepsi', 'Red Bull', 'San Carlos', 'Seven UP', 'Smirnoff', 'Triple Kola', '220V'];
+  const nuevosNegociosBrands = ['Nuna Terra', 'La Bodeguita', 'Eterna', 'KIMBERLY CLARK', 'SOFTYS', 'KENVUE', 'HENKEL', 'Crecer Kids', 'More'];
+  const campariBrands = ['Sky', 'Appleton', 'Cinzano', 'Riccadonna', 'Aperol', 'Wild Turkey', 'Frangelico', 'Bulldog', 'Grand Marnier', 'Espolon'];
+
+  const brandIcons: Record<string, string> = {
+    'Nuna Terra': '🌱', 'La Bodeguita': '🏪', 'Eterna': '🧼', 'KIMBERLY CLARK': '🧻', 'SOFTYS': '☁️',
+    'KENVUE': '🧴', 'HENKEL': '🧪', 'Concordia': '🥤', 'Cubata': '🍹', 'Evervess': '🍸',
+    'Frutaris': '🍎', 'Gatorade': '⚡', 'H2OH': '🍋', 'Lipton': '🍃', 'Mountain': '🏔️',
+    'Pepsi': '🔵', 'Red Bull': '🐂', 'San Carlos': '💧', 'Seven UP': '🍋🟩', 'Smirnoff': '🍸',
+    'Triple Kola': '🟡', '220V': '🔋', 'Sky': '🌌', 'Appleton': '🍎', 'Cinzano': '🍷',
+    'Riccadonna': '🍾', 'Aperol': '🍊', 'Wild Turkey': '🦃', 'Frangelico': '🌰', 'Bulldog': '🐶',
+    'Grand Marnier': '🍊', 'Espolon': '🌵', 'Merch': '👕', 'Crecer Kids': '🧸', 'More': '🍬'
+  };
+
+  const getMainCategory = (p: ProductoStock) => {
+    if (merchCodes.includes(p.material_id)) return 'Merch';
+    if (p.marca && bebidasBrands.includes(p.marca)) return 'Bebidas';
+    if (p.marca && nuevosNegociosBrands.includes(p.marca)) return 'Nuevos Negocios';
+    if (p.marca && campariBrands.includes(p.marca)) return 'Campari';
+    return 'Otros';
+  };
+
+  // Find which main categories actually have stock
+  const allEnrichedProducts = stockReal.map(p => {
+    return {
+      ...p,
+      mainCategory: getMainCategory(p),
+      marcaAgrupada: merchCodes.includes(p.material_id) ? 'Merch' : (p.marca || 'Otros')
+    };
   });
-  const productosBodeguita = productosFiltrados.filter(p => p.grupo === 'La Bodeguita');
-  const productosMore = productosFiltrados.filter(p => p.grupo === 'More');
-  const productosDiageo = productosFiltrados.filter(p => p.grupo === 'DIAGEO');
+
+  const activeMainCategories = ['Bebidas', 'Nuevos Negocios', 'Campari', 'Merch', 'Otros'].filter(
+    cat => allEnrichedProducts.some(p => p.mainCategory === cat)
+  );
+
+  const productosFiltrados = allEnrichedProducts.filter(p => {
+    const coincideBusqueda = p.descripcion.toLowerCase().includes(busquedaProducto.toLowerCase()) || p.material_id.toLowerCase().includes(busquedaProducto.toLowerCase());
+    const coincideCategoria = categoriaFiltro === 'Todos' || p.mainCategory === categoriaFiltro;
+    const coincideMarca = marcaFiltro === 'Todas' || p.marcaAgrupada === marcaFiltro;
+    return coincideBusqueda && coincideCategoria && coincideMarca;
+  });
 
   if (!regionSeleccionada && pantalla !== 'modificar') {
     return (
@@ -617,7 +653,7 @@ export default function Home() {
                 )}
 
                 <label className={`border-2 border-dashed rounded-xl p-6 text-center cursor-pointer block flex-1 flex flex-col justify-center items-center transition-all hover:bg-white/5 ${comprobanteModificado ? 'border-green-400 bg-green-950/20' : 'border-slate-500'}`}>
-                  {comprobanteModificado ? (<><span className="text-3xl mb-1 block">✅</span><p className="text-sm text-green-300 font-bold truncate px-4">{comprobanteModificado.name}</p></>) : (<><span className="text-2xl mb-1 block">📸</span><p className="text-sm text-slate-300 font-bold">Subir Yape / Transferencia Nuevo (Opcional)</p></>)}
+                  {comprobanteModificado ? (<><span className="text-3xl mb-1 block">✅</span><p className="text-sm text-green-300 font-bold truncate px-4">{comprobanteModificado.name}</p></>) : (<><span className="text-2xl mb-1 block">📸</span><p className="text-sm text-slate-300 font-bold">Subir Transferencia Nueva (Opcional)</p></>)}
                   <input type="file" accept="image/*" className="hidden" onChange={(e) => { if (e.target.files && e.target.files[0]) setComprobanteModificado(e.target.files[0]); }} />
                 </label>
               </div>
@@ -702,7 +738,7 @@ export default function Home() {
                 </div>
 
                 <div>
-                  <label className="block text-xs font-bold text-slate-500 mb-1 uppercase tracking-wider">Código Empleado</label>
+                  <label className="block text-xs font-bold text-slate-500 mb-1 uppercase tracking-wider">Código Cadastro</label>
                   <input type="text" value={datosVenta.codigoEmpleado} readOnly placeholder="Se llena automáticamente" className="w-full bg-slate-100 border border-slate-200 rounded-lg px-4 py-3 font-bold text-blue-600 cursor-not-allowed" />
                 </div>
 
@@ -715,9 +751,25 @@ export default function Home() {
               <div className="mt-2">
                 <label className="block text-xs font-bold text-slate-500 mb-2 uppercase tracking-wider">Comprobante de Pago (Obligatorio)</label>
                 <label className={`border-2 border-dashed rounded-xl p-4 text-center hover:bg-slate-50 cursor-pointer block ${comprobante ? 'border-green-400 bg-green-50/30' : 'border-slate-300'}`}>
-                  {comprobante ? (<><span className="text-3xl mb-1 block">✅</span><p className="text-sm text-green-700 font-bold truncate px-4">{comprobante.name}</p></>) : (<><span className="text-2xl mb-1 block">📸</span><p className="text-sm text-slate-600 font-bold">Subir Yape / Transferencia</p></>)}
+                  {comprobante ? (<><span className="text-3xl mb-1 block">✅</span><p className="text-sm text-green-700 font-bold truncate px-4">{comprobante.name}</p></>) : (<><span className="text-2xl mb-1 block">📸</span><p className="text-sm text-slate-600 font-bold">Subir Transferencia</p></>)}
                   <input type="file" accept="image/*" className="hidden" onChange={(e) => { if (e.target.files && e.target.files[0]) setComprobante(e.target.files[0]); }} />
                 </label>
+                <div className="mt-4 p-4 bg-slate-100 rounded-xl text-xs text-slate-600 font-medium border border-slate-200">
+                  <p className="font-bold text-slate-800 mb-2 uppercase tracking-wide">Cuentas Bancarias CBC Peruana SAC</p>
+                  <p className="mb-1">RUC: <span className="font-bold text-slate-800">20600281489</span></p>
+                  <div className="flex flex-col gap-2 mt-3">
+                    <div className="bg-white p-2 rounded-lg border border-slate-200">
+                      <p className="text-[10px] text-slate-400 uppercase font-bold">BBVA Cta. Corriente en Soles</p>
+                      <p className="font-mono font-bold text-slate-700">001101840100045860</p>
+                      <p className="text-[10px] text-slate-500 mt-1">Cód. Recaudación: <span className="font-bold">8897</span></p>
+                    </div>
+                    <div className="bg-white p-2 rounded-lg border border-slate-200">
+                      <p className="text-[10px] text-slate-400 uppercase font-bold">BCP Cta. Corriente en Soles</p>
+                      <p className="font-mono font-bold text-slate-700">193 2269852 0 96</p>
+                      <p className="text-[10px] text-slate-500 mt-1">Cód. Recaudación: <span className="font-bold">12255</span></p>
+                    </div>
+                  </div>
+                </div>
               </div>
 
               <button onClick={procesarPedido} disabled={guardando} className="w-full bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 text-white font-black py-4 rounded-xl shadow-lg transition-all mt-auto text-lg flex justify-center items-center gap-2">
@@ -755,24 +807,36 @@ export default function Home() {
         <div className="max-w-7xl mx-auto px-4" style={{ display: 'flex', gap: '12px', alignItems: 'center', flexWrap: 'wrap' }}>
 
           <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-            {[
-              { key: 'Todos', label: '🏪 Todos' },
-              { key: 'La Bodeguita', label: '🏪 La Bodeguita' },
-              { key: 'More', label: '🍬 More' },
-              { key: 'DIAGEO', label: '🥃 Diageo' },
-            ].map(cat => (
-              <button key={cat.key} onClick={() => setCategoriaFiltro(cat.key)} style={{ padding: '8px 16px', borderRadius: '20px', border: 'none', cursor: 'pointer', fontSize: '13px', fontWeight: 700, transition: 'all 0.2s', background: categoriaFiltro === cat.key ? '#0f172a' : '#f1f5f9', color: categoriaFiltro === cat.key ? '#ffffff' : '#64748b', boxShadow: categoriaFiltro === cat.key ? '0 2px 8px rgba(0,0,0,0.15)' : 'none' }}>
-                {cat.label}
+            <button onClick={() => { setCategoriaFiltro('Todos'); setMarcaFiltro('Todas'); }} style={{ padding: '8px 16px', borderRadius: '20px', border: 'none', cursor: 'pointer', fontSize: '13px', fontWeight: 700, transition: 'all 0.2s', background: categoriaFiltro === 'Todos' ? '#0f172a' : '#f1f5f9', color: categoriaFiltro === 'Todos' ? '#ffffff' : '#64748b', boxShadow: categoriaFiltro === 'Todos' ? '0 2px 8px rgba(0,0,0,0.15)' : 'none' }}>
+              🏪 Todos
+            </button>
+            {activeMainCategories.map(cat => (
+              <button key={cat} onClick={() => { setCategoriaFiltro(cat); setMarcaFiltro('Todas'); }} style={{ padding: '8px 16px', borderRadius: '20px', border: 'none', cursor: 'pointer', fontSize: '13px', fontWeight: 700, transition: 'all 0.2s', background: categoriaFiltro === cat ? '#0f172a' : '#f1f5f9', color: categoriaFiltro === cat ? '#ffffff' : '#64748b', boxShadow: categoriaFiltro === cat ? '0 2px 8px rgba(0,0,0,0.15)' : 'none' }}>
+                {cat === 'Bebidas' ? '🥤 ' : cat === 'Nuevos Negocios' ? '🏢 ' : cat === 'Campari' ? '🥃 ' : cat === 'Merch' ? '👕 ' : '📦 '}{cat}
               </button>
             ))}
           </div>
 
-          <div style={{ flex: 1, minWidth: '220px', position: 'relative' }}>
-            <span style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)', fontSize: '15px', pointerEvents: 'none' }}>🔍</span>
-            <input type="text" value={busquedaProducto} onChange={e => setBusquedaProducto(e.target.value)} placeholder="Buscar por nombre o código de producto..." style={{ width: '100%', padding: '10px 40px 10px 38px', borderRadius: '10px', border: '1px solid #e2e8f0', fontSize: '14px', outline: 'none', background: '#f8fafc', boxSizing: 'border-box', fontFamily: 'inherit' }} />
-            {busquedaProducto && (
-              <button onClick={() => setBusquedaProducto('')} style={{ position: 'absolute', right: '12px', top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', cursor: 'pointer', color: '#94a3b8', fontSize: '16px', padding: 0 }}>✕</button>
+          <div style={{ flex: 1, minWidth: '220px', display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+            {categoriaFiltro !== 'Todos' && (
+              <select 
+                value={marcaFiltro} 
+                onChange={(e) => setMarcaFiltro(e.target.value)}
+                style={{ padding: '10px', borderRadius: '10px', border: '1px solid #e2e8f0', fontSize: '14px', outline: 'none', background: '#f8fafc', fontWeight: 600, color: '#475569', minWidth: '150px' }}
+              >
+                <option value="Todas">Todas las marcas</option>
+                {Array.from(new Set(allEnrichedProducts.filter(p => p.mainCategory === categoriaFiltro).map(p => p.marcaAgrupada))).sort().map(m => (
+                  <option key={m} value={m}>{m}</option>
+                ))}
+              </select>
             )}
+            <div style={{ flex: 1, minWidth: '220px', position: 'relative' }}>
+              <span style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)', fontSize: '15px', pointerEvents: 'none' }}>🔍</span>
+              <input type="text" value={busquedaProducto} onChange={e => setBusquedaProducto(e.target.value)} placeholder="Buscar por nombre o código de producto..." style={{ width: '100%', padding: '10px 40px 10px 38px', borderRadius: '10px', border: '1px solid #e2e8f0', fontSize: '14px', outline: 'none', background: '#f8fafc', boxSizing: 'border-box', fontFamily: 'inherit' }} />
+              {busquedaProducto && (
+                <button onClick={() => setBusquedaProducto('')} style={{ position: 'absolute', right: '12px', top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', cursor: 'pointer', color: '#94a3b8', fontSize: '16px', padding: 0 }}>✕</button>
+              )}
+            </div>
           </div>
         </div>
 
@@ -786,30 +850,43 @@ export default function Home() {
       </div>
 
       <div className="max-w-7xl mx-auto px-4 py-8">
-        {productosBodeguita.length > 0 && (
-          <div className="mb-12">
-            <h2 className="text-2xl font-black text-slate-800 mb-6 flex items-center gap-2"><span className="bg-orange-100 text-orange-600 p-2 rounded-lg text-sm">🏪</span> La Bodeguita</h2>
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-              {productosBodeguita.map((prod) => <TarjetaProducto key={prod.material_id} producto={prod} carrito={carrito} onActualizar={actualizarCantidad} />)}
+        {activeMainCategories.filter(cat => categoriaFiltro === 'Todos' || categoriaFiltro === cat).map(mainCat => {
+          // @ts-ignore
+          const prodsMain = productosFiltrados.filter(p => p.mainCategory === mainCat);
+          if (prodsMain.length === 0) return null;
+
+          const marcasDeMainCat = Array.from(new Set(prodsMain.map((p: any) => p.marcaAgrupada))).sort((a: any, b: any) => {
+            const countA = prodsMain.filter((p: any) => p.marcaAgrupada === a).length;
+            const countB = prodsMain.filter((p: any) => p.marcaAgrupada === b).length;
+            return countB - countA;
+          });
+
+          return (
+            <div key={mainCat} className="mb-14">
+              <h1 className="text-3xl font-black text-slate-800 mb-8 border-b-2 border-slate-200 pb-4 uppercase tracking-widest flex items-center gap-3">
+                <span className="bg-slate-800 text-white p-2 rounded-xl text-xl shadow-md">
+                  {mainCat === 'Bebidas' ? '🥤' : mainCat === 'Nuevos Negocios' ? '🏢' : mainCat === 'Campari' ? '🥃' : mainCat === 'Merch' ? '👕' : '📦'}
+                </span>
+                {mainCat}
+              </h1>
+
+              {marcasDeMainCat.map((marca: any) => {
+                const prodsMarca = prodsMain.filter((p: any) => p.marcaAgrupada === marca);
+                const icon = brandIcons[marca] || '📦';
+                return (
+                  <div key={marca} className="mb-10 pl-6 border-l-4 border-blue-200">
+                    <h2 className="text-xl font-bold text-slate-700 mb-6 flex items-center gap-2">
+                      <span className="text-2xl drop-shadow-sm">{icon}</span> {marca}
+                    </h2>
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+                      {prodsMarca.map((prod: any) => <TarjetaProducto key={prod.material_id} producto={prod} carrito={carrito} onActualizar={actualizarCantidad} />)}
+                    </div>
+                  </div>
+                );
+              })}
             </div>
-          </div>
-        )}
-        {productosMore.length > 0 && (
-          <div className="mb-12">
-            <h2 className="text-2xl font-black text-slate-800 mb-6 flex items-center gap-2"><span className="bg-purple-100 text-purple-600 p-2 rounded-lg text-sm">🍬</span> Gomitas More</h2>
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-              {productosMore.map((prod) => <TarjetaProducto key={prod.material_id} producto={prod} carrito={carrito} onActualizar={actualizarCantidad} />)}
-            </div>
-          </div>
-        )}
-        {productosDiageo.length > 0 && (
-          <div className="mb-12">
-            <h2 className="text-2xl font-black text-slate-800 mb-6 flex items-center gap-2"><span className="bg-amber-100 text-amber-600 p-2 rounded-lg text-sm">🥃</span> Licores Diageo</h2>
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-              {productosDiageo.map((prod) => <TarjetaProducto key={prod.material_id} producto={prod} carrito={carrito} onActualizar={actualizarCantidad} />)}
-            </div>
-          </div>
-        )}
+          );
+        })}
 
         {productosFiltrados.length === 0 && (
           <div className="text-center py-20">

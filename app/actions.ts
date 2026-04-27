@@ -9,7 +9,7 @@ export interface ProductoStock {
   descripcion: string;
   stock: number;
   precio_unitario: number;
-  grupo: string | null;
+  marca: string | null;
   region: string;
 }
 
@@ -36,7 +36,7 @@ export async function obtenerStockPorRegion(region: string): Promise<ProductoSto
   const { rows } = await sql<ProductoStock>`
     SELECT 
       material_id, 
-      descripcion, stock, precio_unitario, grupo, region 
+      descripcion, stock, precio_unitario, marca, region 
     FROM stock_disponible 
     WHERE region = ${region}
     ORDER BY descripcion ASC;
@@ -408,5 +408,120 @@ export async function actualizarEstadoPedido(pedidoId: string, nuevoEstado: stri
   } catch (error) {
     console.error("🔥 Error actualizando estado de pedido:", error);
     return { exito: false, error: error instanceof Error ? error.message : "Fallo al actualizar el estado" };
+  }
+}
+
+// ==========================================
+// ADMIN FUNCTIONS PARA GESTIÓN DE STOCK Y PERSONAL
+// ==========================================
+
+export async function reemplazarStockMasivo(datos: ProductoStock[]) {
+  try {
+    // 1. Limpiamos la tabla
+    await sql`TRUNCATE TABLE stock_disponible;`;
+
+    // 2. Insertamos los nuevos
+    for (const item of datos) {
+      await sql`
+        INSERT INTO stock_disponible (material_id, descripcion, stock, precio_unitario, marca, region)
+        VALUES (${item.material_id}, ${item.descripcion}, ${item.stock}, ${item.precio_unitario}, ${item.marca}, ${item.region});
+      `;
+    }
+    return { exito: true };
+  } catch (error) {
+    console.error("🔥 Error reemplazando stock:", error);
+    return { exito: false, error: error instanceof Error ? error.message : "Fallo al reemplazar stock" };
+  }
+}
+
+export async function agregarStockMasivo(datos: ProductoStock[]) {
+  try {
+    for (const item of datos) {
+      await sql`
+        INSERT INTO stock_disponible (material_id, descripcion, stock, precio_unitario, marca, region)
+        VALUES (${item.material_id}, ${item.descripcion}, ${item.stock}, ${item.precio_unitario}, ${item.marca}, ${item.region})
+        ON CONFLICT (material_id) DO UPDATE 
+        SET stock = stock_disponible.stock + EXCLUDED.stock,
+            precio_unitario = EXCLUDED.precio_unitario,
+            descripcion = EXCLUDED.descripcion,
+            marca = EXCLUDED.marca,
+            region = EXCLUDED.region;
+      `;
+    }
+    return { exito: true };
+  } catch (error) {
+    console.error("🔥 Error agregando stock:", error);
+    return { exito: false, error: error instanceof Error ? error.message : "Fallo al agregar stock" };
+  }
+}
+
+export async function reemplazarPersonalMasivo(datos: Vendedor[]) {
+  try {
+    await sql`TRUNCATE TABLE vendedores;`;
+
+    for (const item of datos) {
+      await sql`
+        INSERT INTO vendedores (codigo_empleado, nombre_completo)
+        VALUES (${item.codigo_empleado}, ${item.nombre_completo});
+      `;
+    }
+    return { exito: true };
+  } catch (error) {
+    console.error("🔥 Error reemplazando personal:", error);
+    return { exito: false, error: error instanceof Error ? error.message : "Fallo al reemplazar personal" };
+  }
+}
+
+export async function agregarPersonalMasivo(datos: Vendedor[]) {
+  try {
+    for (const item of datos) {
+      await sql`
+        INSERT INTO vendedores (codigo_empleado, nombre_completo)
+        VALUES (${item.codigo_empleado}, ${item.nombre_completo})
+        ON CONFLICT (codigo_empleado) DO UPDATE 
+        SET nombre_completo = EXCLUDED.nombre_completo;
+      `;
+    }
+    return { exito: true };
+  } catch (error) {
+    console.error("🔥 Error agregando personal:", error);
+    return { exito: false, error: error instanceof Error ? error.message : "Fallo al agregar personal" };
+  }
+}
+
+export async function eliminarPersonal(codigo_empleado: string) {
+  try {
+    await sql`
+      DELETE FROM vendedores WHERE codigo_empleado = ${codigo_empleado};
+    `;
+    return { exito: true };
+  } catch (error) {
+    console.error("🔥 Error eliminando personal:", error);
+    return { exito: false, error: error instanceof Error ? error.message : "Fallo al eliminar personal" };
+  }
+}
+
+export async function modificarPersonal(codigo_empleado: string, nuevo_nombre: string) {
+  try {
+    await sql`
+      UPDATE vendedores SET nombre_completo = ${nuevo_nombre} WHERE codigo_empleado = ${codigo_empleado};
+    `;
+    return { exito: true };
+  } catch (error) {
+    console.error("🔥 Error modificando personal:", error);
+    return { exito: false, error: error instanceof Error ? error.message : "Fallo al modificar personal" };
+  }
+}
+
+export async function agregarPersonal(codigo_empleado: string, nombre_completo: string) {
+  try {
+    await sql`
+      INSERT INTO vendedores (codigo_empleado, nombre_completo)
+      VALUES (${codigo_empleado}, ${nombre_completo});
+    `;
+    return { exito: true };
+  } catch (error) {
+    console.error("🔥 Error agregando personal:", error);
+    return { exito: false, error: error instanceof Error ? error.message : "Fallo al agregar personal" };
   }
 }
